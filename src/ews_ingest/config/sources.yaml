@@ -373,6 +373,14 @@
   enabled: true
   backfill: 18mo
 
+- source_id: news.google_news_rss
+  host: news.google.com
+  rps: 1.0
+  burst: 1
+  retries: 3
+  enabled: true
+  backfill: 18mo
+
 - source_id: news.mastodon
   host: mastodon.social
   rps: 1.0

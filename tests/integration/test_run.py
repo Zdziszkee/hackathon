@@ -46,3 +46,13 @@ def test_gdelt_sector_query_smoke(tmp_path: Path) -> None:
     src = get_source("news.gdelt")
     # Network may legitimately return no hits; just ensure no exception.
     list(src.fetch(ctx))
+
+
+@pytest.mark.skipif(not _ENABLED, reason="set EWS_RUN_INTEGRATION=1 to run live tests")
+def test_google_news_rss_smoke(tmp_path: Path) -> None:
+    services = _services(tmp_path)
+    ctx = build_context(services, "news.google_news_rss", run_id="int3")
+    ctx.resolver = _one_entity_resolver(Identifiers(name="XPO Inc"))
+    src = get_source("news.google_news_rss")
+    # Network may legitimately return no hits; just ensure no exception.
+    list(src.fetch(ctx))

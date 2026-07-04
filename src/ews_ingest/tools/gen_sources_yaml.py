@@ -217,6 +217,7 @@ _OVERRIDES: dict[str, dict[str, object]] = {
     "news.presswire": {"host": "www.globenewswire.com", "rps": 1.0, "backfill": "18mo"},
     "news.bluesky": {"host": "public.api.bsky.app", "rps": 1.0, "backfill": "18mo"},
     "news.mastodon": {"host": "mastodon.social", "rps": 1.0, "backfill": "18mo"},
+    "news.google_news_rss": {"host": "news.google.com", "rps": 1.0, "backfill": "18mo"},
     # Macro scrape.
     "macro.ism_pmi": {"host": "www.ismworld.org", "rps": 0.5, "backfill": "5y"},
     "macro.regional_fed": {"host": "www.philadelphiafed.org", "rps": 1.0, "backfill": "5y"},
