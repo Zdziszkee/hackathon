@@ -184,19 +184,6 @@ _OVERRIDES: dict[str, dict[str, object]] = {
         "backfill": "full",
         "env_required": ["OPENSANCTIONS_API_KEY"],
     },
-    "identity.opencorporates": {
-        "host": "api.opencorporates.com",
-        "rps": 0.3,
-        "backfill": "full",
-        "env_required": ["OPENCORPORATES_API_TOKEN"],
-    },
-    "news.stocktwits": {
-        "host": "api.stocktwits.com",
-        "rps": 1.0,
-        "backfill": "18mo",
-        "env_required": ["STOCKTWITS_ACCESS_TOKEN"],
-    },
-
     # GLEIF / GDELT / EPA / BTS / Treasury / NWS / NHC — no key.
     "identity.gleif_l1": {"host": "api.gleif.org", "rps": 2.0, "backfill": "full"},
     "identity.gleif_l2": {"host": "api.gleif.org", "rps": 2.0, "backfill": "full"},
@@ -226,8 +213,6 @@ _OVERRIDES: dict[str, dict[str, object]] = {
     "identity.wikidata": {"host": "query.wikidata.org", "rps": 1.0, "backfill": "full"},
     # Market data (unofficial / scrape).
     "credit_market.yahoo": {"host": "query1.finance.yahoo.com", "rps": 1.0, "backfill": "5y"},
-    "news.google_news_rss": {"host": "news.google.com", "rps": 1.0, "backfill": "18mo"},
-    "news.google_trends": {"host": "trends.google.com", "rps": 0.5, "backfill": "18mo"},
     "news.common_crawl_news": {"host": "index.commoncrawl.org", "rps": 1.0, "backfill": "full"},
     "news.presswire": {"host": "www.globenewswire.com", "rps": 1.0, "backfill": "18mo"},
     "news.bluesky": {"host": "public.api.bsky.app", "rps": 1.0, "backfill": "18mo"},

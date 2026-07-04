@@ -190,15 +190,6 @@
   enabled: true
   backfill: full
 
-- source_id: identity.opencorporates
-  host: api.opencorporates.com
-  rps: 0.3
-  burst: 1
-  retries: 3
-  enabled: true
-  backfill: full
-  env_required: ["OPENCORPORATES_API_TOKEN"]
-
 - source_id: identity.sec_identity
   host: data.sec.gov
   rps: 8.0
@@ -382,22 +373,6 @@
   enabled: true
   backfill: 18mo
 
-- source_id: news.google_news_rss
-  host: news.google.com
-  rps: 1.0
-  burst: 1
-  retries: 3
-  enabled: true
-  backfill: 18mo
-
-- source_id: news.google_trends
-  host: trends.google.com
-  rps: 0.5
-  burst: 1
-  retries: 3
-  enabled: true
-  backfill: 18mo
-
 - source_id: news.mastodon
   host: mastodon.social
   rps: 1.0
@@ -413,15 +388,6 @@
   retries: 3
   enabled: true
   backfill: 18mo
-
-- source_id: news.stocktwits
-  host: api.stocktwits.com
-  rps: 1.0
-  burst: 1
-  retries: 3
-  enabled: true
-  backfill: 18mo
-  env_required: ["STOCKTWITS_ACCESS_TOKEN"]
 
 - source_id: petrochem.csb_reports
   host: www.csb.gov

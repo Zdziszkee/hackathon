@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from ews_ingest.sources.identity import (  # noqa: F401
     gleif,
-    opencorporates,
     sec_identity,
     sec_proxy_forms,
     wikidata,
