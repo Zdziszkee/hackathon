@@ -1,0 +1,87 @@
+[project]
+name = "hackathon"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.14"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.20",
+    "ty>=0.0.56",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "N",   # pep8-naming
+    "RUF", # ruff-specific
+    "ANN", # flake8-annotations
+    "S",   # flake8-bandit
+    "C4",  # flake8-comprehensions
+    "RET", # flake8-return
+    "ARG", # flake8-unused-arguments
+    "A",   # flake8-builtins
+    "DTZ", # flake8-datetimez
+    "ISC", # flake8-implicit-str-concat
+    "G",   # flake8-logging-format
+    "PIE", # flake8-pie
+    "T20", # flake8-print
+    "PT",  # flake8-pytest-style
+    "Q",   # flake8-quotes
+    "C90", # mccabe complexity
+    "PLC", # pylint conventions
+    "PLE", # pylint errors
+    "PLW", # pylint warnings
+    "TRY", # tryceratops (exception handling)
+    "EM",  # flake8-errmsg
+    "FA",  # flake8-future-annotations
+    "FBT", # flake8-boolean-trap (don't use bool as positional arg)
+    "DJ",  # flake8-django
+    "PLR", # pylint refactor (selected below)
+]
+ignore = [
+    "COM812", # conflicts with formatter
+    "ISC001", # conflicts with formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "ANN", "PLR2004", "T201"]
+"**/main.py" = ["T201"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 5
+max-branches = 12
+max-returns = 6
+max-statements = 50
+
+[tool.ruff.format]
+line-ending = "lf"
+
+[tool.ty.environment]
+python-version = "3.14"
+python-platform = "linux"
+
+[tool.ty.terminal]
+error-on-warning = true
+output-format = "full"
+
+[tool.ty.analysis]
+respect-type-ignore-comments = false
+
+[tool.ty.rules]
+# Default: turn everything (including warnings) into hard errors so CI fails
+all = "error"
