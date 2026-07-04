@@ -81,15 +81,6 @@
   backfill: full
   env_required: ["SEC_USER_AGENT"]
 
-- source_id: credit_market.alpha_vantage
-  host: www.alphavantage.co
-  rps: 0.5
-  burst: 1
-  retries: 1
-  enabled: true
-  backfill: 5y
-  env_required: ["ALPHAVANTAGE_API_KEY"]
-
 - source_id: credit_market.finra_trace
   host: api.finra.org
   rps: 1.0
@@ -134,14 +125,6 @@
   backfill: full
   env_required: ["SEC_USER_AGENT"]
 
-- source_id: credit_market.stooq
-  host: stooq.com
-  rps: 1.0
-  burst: 1
-  retries: 3
-  enabled: true
-  backfill: 5y
-
 - source_id: credit_market.treasury_fiscaldata
   host: api.fiscaldata.treasury.gov
   rps: 2.0
@@ -149,15 +132,6 @@
   retries: 3
   enabled: true
   backfill: 5y
-
-- source_id: credit_market.twelve_data
-  host: api.twelvedata.com
-  rps: 1.0
-  burst: 1
-  retries: 3
-  enabled: true
-  backfill: 5y
-  env_required: ["TWELVEDATA_API_KEY"]
 
 - source_id: credit_market.yahoo
   host: query1.finance.yahoo.com
@@ -533,31 +507,6 @@
   backfill: 5y
   env_required: ["FRED_API_KEY"]
 
-- source_id: sanctions.consolidated_screening
-  host: api.trade.gov
-  rps: 1.0
-  burst: 1
-  retries: 3
-  enabled: true
-  backfill: full
-  env_required: ["CSL_API_KEY"]
-
-- source_id: sanctions.eu_sanctions
-  host: webgate.ec.europa.eu
-  rps: 1.0
-  burst: 1
-  retries: 3
-  enabled: true
-  backfill: full
-
-- source_id: sanctions.ofac_sdn
-  host: www.treasury.gov
-  rps: 1.0
-  burst: 1
-  retries: 3
-  enabled: true
-  backfill: full
-
 - source_id: sanctions.opensanctions
   host: data.opensanctions.org
   rps: 1.0
@@ -566,14 +515,6 @@
   enabled: true
   backfill: full
   env_required: ["OPENSANCTIONS_API_KEY"]
-
-- source_id: sanctions.un_security
-  host: scsanctions.un.org
-  rps: 1.0
-  burst: 1
-  retries: 3
-  enabled: true
-  backfill: full
 
 - source_id: sanctions.world_bank_debarred
   host: www.worldbank.org

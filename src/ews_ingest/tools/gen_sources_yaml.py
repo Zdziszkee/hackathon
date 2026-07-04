@@ -178,26 +178,6 @@ _OVERRIDES: dict[str, dict[str, object]] = {
         "backfill": "5y",
         "env_required": ["FINRA_API_KEY"],
     },
-    "credit_market.alpha_vantage": {
-        "host": "www.alphavantage.co",
-        "rps": 0.5,
-        "burst": 1,
-        "retries": 1,
-        "backfill": "5y",
-        "env_required": ["ALPHAVANTAGE_API_KEY"],
-    },
-    "credit_market.twelve_data": {
-        "host": "api.twelvedata.com",
-        "rps": 1.0,
-        "backfill": "5y",
-        "env_required": ["TWELVEDATA_API_KEY"],
-    },
-    "sanctions.consolidated_screening": {
-        "host": "api.trade.gov",
-        "rps": 1.0,
-        "backfill": "full",
-        "env_required": ["CSL_API_KEY"],
-    },
     "sanctions.opensanctions": {
         "host": "data.opensanctions.org",
         "rps": 1.0,
@@ -246,7 +226,6 @@ _OVERRIDES: dict[str, dict[str, object]] = {
     "identity.wikidata": {"host": "query.wikidata.org", "rps": 1.0, "backfill": "full"},
     # Market data (unofficial / scrape).
     "credit_market.yahoo": {"host": "query1.finance.yahoo.com", "rps": 1.0, "backfill": "5y"},
-    "credit_market.stooq": {"host": "stooq.com", "rps": 1.0, "backfill": "5y"},
     "news.google_news_rss": {"host": "news.google.com", "rps": 1.0, "backfill": "18mo"},
     "news.google_trends": {"host": "trends.google.com", "rps": 0.5, "backfill": "18mo"},
     "news.common_crawl_news": {"host": "index.commoncrawl.org", "rps": 1.0, "backfill": "full"},
@@ -258,9 +237,6 @@ _OVERRIDES: dict[str, dict[str, object]] = {
     "macro.regional_fed": {"host": "www.philadelphiafed.org", "rps": 1.0, "backfill": "5y"},
     "transport.ata_tonnage": {"host": "www.trucking.org", "rps": 0.5, "backfill": "18mo"},
     # Bulk manifests (no key, low rate).
-    "sanctions.ofac_sdn": {"host": "www.treasury.gov", "rps": 1.0, "backfill": "full"},
-    "sanctions.un_security": {"host": "scsanctions.un.org", "rps": 1.0, "backfill": "full"},
-    "sanctions.eu_sanctions": {"host": "webgate.ec.europa.eu", "rps": 1.0, "backfill": "full"},
     "sanctions.world_bank_debarred": {"host": "www.worldbank.org", "rps": 1.0, "backfill": "full"},
     "transport.fmcsa_census": {"host": "ai.fmcsa.dot.gov", "rps": 1.0, "backfill": "full"},
     "transport.fmcsa_li_insurance": {"host": "ai.fmcsa.dot.gov", "rps": 1.0, "backfill": "full"},
