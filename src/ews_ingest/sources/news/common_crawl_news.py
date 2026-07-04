@@ -11,7 +11,7 @@ from ews_ingest.core.registry import register_source
 
 __all__ = ["CommonCrawlNews", "parse"]
 
-INDEX_URL = "https://index.commoncrawl.org/collinfo"
+INDEX_URL = "https://index.commoncrawl.org/collinfo.json"
 
 
 def parse(raw: list[object]) -> list[RecordInput]:

@@ -13,8 +13,7 @@ __all__ = ["StateSosUcc", "parse"]
 
 # Generic public-records search portals; formats vary by state.
 PORTALS: tuple[str, ...] = (
-    "https://direct.sos.state.tx.us/ucc/",
-    "https://bsd.sos.state.or.us/ucc/",
+    "https://www.sos.state.tx.us/ucc/index.shtml",
     "https://corp.sec.state.ma.us/uccweb/",
 )
 

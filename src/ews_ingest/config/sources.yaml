@@ -148,6 +148,7 @@
   retries: 3
   enabled: true
   backfill: full
+  env_required: ["COURTLISTENER_API_KEY"]
 
 - source_id: default_truth.pacer
   host: pacer.uscourts.gov
@@ -167,7 +168,7 @@
   env_required: ["SEC_USER_AGENT"]
 
 - source_id: default_truth.state_sos_ucc
-  host: direct.sos.state.tx.us
+  host: www.sos.state.tx.us
   rps: 0.3
   burst: 1
   retries: 3
@@ -321,7 +322,7 @@
   rps: 0.5
   burst: 1
   retries: 3
-  enabled: true
+  enabled: false
   backfill: 5y
 
 - source_id: macro.regional_fed
@@ -373,14 +374,6 @@
   enabled: true
   backfill: 18mo
 
-- source_id: news.google_news_rss
-  host: news.google.com
-  rps: 1.0
-  burst: 1
-  retries: 3
-  enabled: true
-  backfill: 18mo
-
 - source_id: news.mastodon
   host: mastodon.social
   rps: 1.0
@@ -419,7 +412,7 @@
   rps: 2.0
   burst: 1
   retries: 3
-  enabled: true
+  enabled: false
   backfill: 5y
 
 - source_id: petrochem.epa_frs
@@ -431,7 +424,7 @@
   backfill: 5y
 
 - source_id: petrochem.epa_tri
-  host: enviro.epa.gov
+  host: data.epa.gov
   rps: 2.0
   burst: 1
   retries: 3
@@ -482,7 +475,7 @@
   env_required: ["FRED_API_KEY"]
 
 - source_id: sanctions.opensanctions
-  host: data.opensanctions.org
+  host: api.opensanctions.org
   rps: 1.0
   burst: 1
   retries: 3
@@ -531,12 +524,13 @@
   backfill: 5y
 
 - source_id: supply_chain.un_comtrade
-  host: comtrade.un.org
+  host: comtradeapi.un.org
   rps: 1.0
   burst: 1
   retries: 3
   enabled: true
   backfill: 5y
+  env_required: ["UN_COMTRADE_API_KEY"]
 
 - source_id: transport.ata_tonnage
   host: www.trucking.org
@@ -555,15 +549,15 @@
   backfill: 18mo
 
 - source_id: transport.bts_air_consumer
-  host: data.bts.gov
+  host: data.transportation.gov
   rps: 2.0
   burst: 1
   retries: 3
-  enabled: true
+  enabled: false
   backfill: 5y
 
 - source_id: transport.bts_ftsi
-  host: data.bts.gov
+  host: data.transportation.gov
   rps: 2.0
   burst: 1
   retries: 3
@@ -592,7 +586,7 @@
   rps: 1.0
   burst: 1
   retries: 3
-  enabled: true
+  enabled: false
   backfill: full
 
 - source_id: transport.fmcsa_li_insurance
@@ -632,7 +626,7 @@
   rps: 1.0
   burst: 1
   retries: 3
-  enabled: true
+  enabled: false
   backfill: 5y
 
 - source_id: transport.ntsb_carol
@@ -640,7 +634,7 @@
   rps: 1.0
   burst: 1
   retries: 3
-  enabled: true
+  enabled: false
   backfill: 5y
 
 - source_id: transport.usace_nav
@@ -661,7 +655,7 @@
   env_required: ["CENSUS_API_KEY"]
 
 - source_id: universe.epa_tri_universe
-  host: enviro.epa.gov
+  host: data.epa.gov
   rps: 2.0
   burst: 1
   retries: 3
@@ -673,7 +667,7 @@
   rps: 1.0
   burst: 1
   retries: 3
-  enabled: true
+  enabled: false
   backfill: full
 
 - source_id: universe.naics_census

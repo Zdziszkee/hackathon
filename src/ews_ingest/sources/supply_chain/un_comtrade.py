@@ -22,7 +22,7 @@ from ews_ingest.core.registry import register_source
 
 __all__ = ["UnComtrade", "parse"]
 
-LEGACY_BASE = "https://comtrade.un.org/api/get"
+LEGACY_BASE = "https://comtrade.un.org/api/get"  # deprecated; returns HTML
 MODERN_BASE = "https://comtradeapi.un.org/data/v1/get/C/A/HS"
 
 # (commodity code, label, sector)
@@ -44,21 +44,6 @@ def parse(raw: dict[str, object]) -> list[RecordInput]:
     return [RecordInput(payload={"trade_row": r}, raw_format=RawFormat.JSON) for r in items]
 
 
-def _legacy_params(code: str, flow: str) -> dict[str, str | int]:
-    return {
-        "max": 500,
-        "type": "C",
-        "freq": "A",
-        "px": "HS",
-        "ps": "2022",
-        "r": REPORTER_US,
-        "p": "all",
-        "rg": flow,
-        "cc": code,
-        "fmt": "json",
-    }
-
-
 @register_source("supply_chain.un_comtrade")
 class UnComtrade:
     """Pull US-reported trade flows for sector-relevant commodity codes."""
@@ -68,17 +53,26 @@ class UnComtrade:
 
     def fetch(self, ctx: FetchContext) -> Iterator[RawRecord]:
         key = os.environ.get("UN_COMTRADE_API_KEY", "")
+        if not key:
+            return
+        headers = {"subscription-key": key}
         for code, label, sector in COMMODITIES:
             for flow in (FLOW_IMPORT, FLOW_EXPORT):
-                params = _legacy_params(code, flow)
-                raw = ctx.http.get_json(LEGACY_BASE, policy=ctx.rate_policy, params=params)
+                params: dict[str, str | int] = {
+                    "reporterCode": REPORTER_US,
+                    "period": "2022",
+                    "partnerCode": "all",
+                    "flowCode": flow,
+                    "cmdCode": code,
+                }
+                url = MODERN_BASE
+                raw = ctx.http.get_json(url, policy=ctx.rate_policy, params=params, headers=headers)
                 for spec in parse(raw):
-                    spec.url = LEGACY_BASE
+                    spec.url = url
                     spec.extra = {
                         "commodity_code": code,
                         "label": label,
                         "sector": sector,
                         "flow": "import" if flow == FLOW_IMPORT else "export",
-                        "modern_api_key": bool(key),
                     }
                     yield build_record(ctx, self.source_id, self.source_type, spec)

@@ -15,9 +15,8 @@ __all__ = ["Presswire", "parse"]
 
 # Known sector/industry press-wire RSS feeds (free, public).
 FEEDS: tuple[str, ...] = (
-    "https://www.globenewswire.com/RssFeed/industry/413/Transportation",
-    "https://www.globenewswire.com/RssFeed/industry/226/Chemicals",
-    "https://feeds.businesswire.com/BWIndustryNews",
+    "https://www.globenewswire.com/rss/industry/413/Transportation",
+    "https://www.globenewswire.com/rss/industry/226/Chemicals",
 )
 
 

@@ -12,7 +12,7 @@ from ews_ingest.core.registry import register_source
 
 __all__ = ["Opensanctions", "parse"]
 
-BASE = "https://data.opensanctions.org"
+BASE = "https://api.opensanctions.org"
 
 
 def parse(raw: dict[str, object]) -> list[RecordInput]:
@@ -34,7 +34,7 @@ class Opensanctions:
         for entity in ctx.resolver.all():
             if not entity.name:
                 continue
-            url = f"{BASE}s/search/default"
+            url = f"{BASE}/search/default"
             params: dict[str, str | int] = {"q": entity.name}
             if api_key:
                 params["api_key"] = api_key

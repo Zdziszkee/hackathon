@@ -6,16 +6,16 @@ from collections.abc import Iterator
 
 from ews_ingest.core.http import HttpClient, RatePolicy
 
-DATA_BTS = "https://data.bts.gov/resource"
+DATA_BTS = "https://data.transportation.gov/resource"
 TRANSTATS = "https://transtats.bts.gov"
 
 __all__ = ["socrata", "transtats_bulk_stream", "transtats_bulk_url"]
 
-# Socrata resource IDs (4x4) for key BTS datasets.
+# Socrata 4x4 resource IDs on data.transportation.gov (migrated from data.bts.gov).
 RESOURCES: dict[str, str] = {
-    "ftsi": "b5nx-4t5r",  # Freight Transportation Services Index
+    "ftsi": "bw6n-ddqk",  # Transportation Services Index & Seasonally-Adjusted Data
     "t100_segment": "xpc5-4hui",  # T-100 segment data (placeholder id)
-    "air_consumer": "upne-bx7j",  # Air Travel Consumer Report (placeholder id)
+    "air_consumer": "upne-bx7j",  # Air Travel Consumer Report (legacy id; verify)
 }
 
 

@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
+
+import httpx
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 from ews_ingest.providers import sec
+
+_logger = logging.getLogger(__name__)
 
 __all__ = ["SecConceptFrames"]
 
@@ -40,12 +45,19 @@ class SecConceptFrames:
             if not entity.cik:
                 continue
             for tax, tag in CONCEPTS:
-                raw = sec.concept(
-                    ctx.http,
-                    ctx.rate_policy,
-                    cik=entity.cik,
-                    concept_path=f"{tax}/{tag}",
-                )
+                url = f"https://data.sec.gov/api/xbrl/companyconcept/CIK{entity.cik.zfill(10)}/{tax}/{tag}.json"
+                try:
+                    raw = sec.concept(
+                        ctx.http,
+                        ctx.rate_policy,
+                        cik=entity.cik,
+                        concept_path=f"{tax}/{tag}",
+                    )
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == httpx.codes.NOT_FOUND:
+                        _logger.debug("concept %s/%s not reported by %s", tax, tag, entity.cik)
+                        continue
+                    raise
                 yield build_record(
                     ctx,
                     self.source_id,
@@ -54,7 +66,7 @@ class SecConceptFrames:
                         payload=raw,
                         raw_format=RawFormat.JSON,
                         entities=[entity],
-                        url=f"https://data.sec.gov/api/xbrl/companyconcept/CIK{entity.cik.zfill(10)}/{tax}/{tag}.json",
+                        url=url,
                     ),
                 )
         for tax, tag, frame in CROSS_FRAMES:

@@ -12,27 +12,27 @@ from ews_ingest.core.registry import register_source
 __all__ = ["FedReleases", "parse"]
 
 RELEASES: tuple[tuple[str, str], ...] = (
-    ("https://www.federalreserve.gov/datadownload/Output/csvData/FED-H15/h15.csv", "H15"),
-    ("https://www.federalreserve.gov/datadownload/Output/csvData/FED-G17/g17.csv", "G17"),
+    ("https://www.federalreserve.gov/releases/h15/", "H15"),
+    ("https://www.federalreserve.gov/releases/g17/", "G17"),
 )
 
 
 def parse(text: str) -> list[RecordInput]:
-    """Wrap a release CSV body as one record."""
-    return [RecordInput(payload={"csv": text}, raw_format=RawFormat.CSV)]
+    """Wrap a release HTML page as one record."""
+    return [RecordInput(payload={"page_text": text[:5000]}, raw_format=RawFormat.HTML)]
 
 
 @register_source("macro.fed_releases")
 class FedReleases:
-    """Fetch Fed H.15 / G.17 release CSVs (best-effort endpoints)."""
+    """Scrape Fed H.15 / G.17 release pages (CSV downloads discontinued)."""
 
     source_id = "macro.fed_releases"
-    source_type = SourceType.API
+    source_type = SourceType.SCRAPE
 
     def fetch(self, ctx: FetchContext) -> Iterator[RawRecord]:
         for url, label in RELEASES:
             text = ctx.http.get_text(url, policy=ctx.rate_policy)
             for spec in parse(text):
                 spec.url = url
-                spec.extra = {"release": label, "note": "verify_endpoint"}
+                spec.extra = {"release": label}
                 yield build_record(ctx, self.source_id, self.source_type, spec)

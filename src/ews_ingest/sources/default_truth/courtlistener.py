@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
@@ -34,6 +35,8 @@ class Courtlistener:
     source_type = SourceType.API
 
     def fetch(self, ctx: FetchContext) -> Iterator[RawRecord]:
+        token = os.environ.get("COURTLISTENER_API_KEY", "")
+        headers = {"Authorization": f"Token {token}"} if token else None
         for entity in ctx.resolver.all():
             if not entity.name:
                 continue
@@ -43,7 +46,7 @@ class Courtlistener:
                 "court": "bankr",
                 "order_by": "score desc",
             }
-            raw = ctx.http.get_json(DOCKETS, policy=ctx.rate_policy, params=params)
+            raw = ctx.http.get_json(DOCKETS, policy=ctx.rate_policy, params=params, headers=headers)
             for spec in parse(raw):
                 spec.entities = [entity]
                 spec.url = DOCKETS

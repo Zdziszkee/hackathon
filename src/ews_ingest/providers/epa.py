@@ -1,11 +1,16 @@
-"""EPA transport: ECHO (enforcement), TRI (releases), FRS (facility IDs). No key."""
+"""EPA transport: Envirofacts DMAP REST (TRI/FRS) + ECHO. No key.
+
+Envirofacts migrated from ``enviro.epa.gov/enviro/efservice`` to the DMAP REST
+data service at ``data.epa.gov/dmapservice``. Tables are addressed as
+``{program}.{table}`` (e.g. ``tri.tri_facility``); filters are path segments.
+"""
 
 from __future__ import annotations
 
 from ews_ingest.core.http import HttpClient, RatePolicy
 
-ECHO_REST = "https://ofmpub.epa.gov/echo/echo_rest_services"
-TRI_EFSERVICE = "https://enviro.epa.gov/enviro/efservice"
+ECHO_REST = "https://ofmpub.epa.gov/echo/echo_rest_services"  # legacy; retired
+DMAP = "https://data.epa.gov/dmapservice"
 FRS_QUERY = "https://frsquery.epa.gov"
 
 __all__ = ["echo_rest", "frs_facility", "tri_table"]
@@ -34,8 +39,15 @@ def tri_table(
     table: str,
     params: dict[str, str | int] | None = None,
 ) -> list[object]:
-    url = f"{TRI_EFSERVICE}/{table}/JSON"
-    return http.get_json_list(url, policy=policy, params=params)
+    """Fetch rows from a TRI DMAP table (paged manifest-style).
+
+    ``table`` is the DMAP table path e.g. ``tri.tri_facility``. ``params`` may
+    carry ``rows_first``/``rows_last`` for paging (defaults 1:100).
+    """
+    first = int(params.get("rows_first", 1)) if params else 1
+    last = int(params.get("rows_last", 100)) if params else 100
+    url = f"{DMAP}/{table}/{first}:{last}/JSON"
+    return http.get_json_list(url, policy=policy)
 
 
 def frs_facility(http: HttpClient, policy: RatePolicy, *, registry_id: str) -> dict[str, object]:

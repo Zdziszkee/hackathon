@@ -48,10 +48,11 @@ class EpaTriUniverse:
         rows = epa.tri_table(
             ctx.http,
             ctx.rate_policy,
-            table="TRI_FACILITY",
-            params={"NAICS": epa.NAICS_325},
+            table="tri.tri_facility",
+            params={"rows_first": 1, "rows_last": 500},
         )
-        url = "https://enviro.epa.gov/enviro/efservice/TRI_FACILITY/JSON"
+        url = "https://data.epa.gov/dmapservice/tri.tri_facility/1:500/JSON"
         for spec in parse(rows):
             spec.url = url
+            spec.extra = {"note": "NAICS-325 scoping deferred; DMAP filter column TBD"}
             yield build_record(ctx, self.source_id, self.source_type, spec)

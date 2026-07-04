@@ -11,7 +11,7 @@ from ews_ingest.core.registry import register_source
 
 __all__ = ["AtaTonnage", "parse"]
 
-URL = "https://www.trucking.org/article/ATA-Truck-Tonnage-Index"
+URL = "https://www.trucking.org/economics-and-industry-data"
 
 
 def parse(text: str) -> list[RecordInput]:

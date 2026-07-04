@@ -11,7 +11,7 @@ from ews_ingest.core.registry import register_source
 
 __all__ = ["Bluesky", "parse"]
 
-SEARCH_URL = "https://public.api.bsky.app/xrpc/app.bsky.actor.search"
+SEARCH_URL = "https://public.api.bsky.app/xrpc/app.bsky.actor.searchActors"
 
 
 def parse(raw: dict[str, object]) -> list[RecordInput]:
