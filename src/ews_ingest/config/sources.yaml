@@ -440,15 +440,6 @@
   enabled: true
   backfill: 18mo
 
-- source_id: news.reddit
-  host: www.reddit.com
-  rps: 1.0
-  burst: 1
-  retries: 3
-  enabled: true
-  backfill: 18mo
-  env_required: ["REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET"]
-
 - source_id: news.stocktwits
   host: api.stocktwits.com
   rps: 1.0

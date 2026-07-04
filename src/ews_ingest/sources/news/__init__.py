@@ -12,6 +12,5 @@ from ews_ingest.sources.news import (  # noqa: F401
     google_trends,
     mastodon,
     presswire,
-    reddit,
     stocktwits,
 )

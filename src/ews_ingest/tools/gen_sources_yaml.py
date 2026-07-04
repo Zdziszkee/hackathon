@@ -216,12 +216,7 @@ _OVERRIDES: dict[str, dict[str, object]] = {
         "backfill": "18mo",
         "env_required": ["STOCKTWITS_ACCESS_TOKEN"],
     },
-    "news.reddit": {
-        "host": "www.reddit.com",
-        "rps": 1.0,
-        "backfill": "18mo",
-        "env_required": ["REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET"],
-    },
+
     # GLEIF / GDELT / EPA / BTS / Treasury / NWS / NHC — no key.
     "identity.gleif_l1": {"host": "api.gleif.org", "rps": 2.0, "backfill": "full"},
     "identity.gleif_l2": {"host": "api.gleif.org", "rps": 2.0, "backfill": "full"},
