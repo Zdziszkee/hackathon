@@ -1,4 +1,8 @@
-"""Google News RSS (spec §2): headlines by query."""
+"""Google News RSS (spec §2): headlines by query.
+
+Fetched via scrapling (:class:`~ews_ingest.core.scrape.Scraper`) rather than
+plain httpx: Google aggressively rate-limits/blocks non-browser traffic.
+"""
 
 from __future__ import annotations
 
@@ -20,8 +24,10 @@ def _query(text: str) -> str:
     return text.replace(" ", "+")
 
 
-def parse(text: str) -> list[RecordInput]:
+def parse(adaptor: object) -> list[RecordInput]:
     """Parse a Google News RSS XML body into one record per entry."""
+    body = getattr(adaptor, "body", b"") or b""
+    text = body.decode("utf-8", errors="replace") if isinstance(body, bytes) else str(body)
     feed = feedparser.parse(text)
     out: list[RecordInput] = []
     for entry in feed.entries:
@@ -45,15 +51,15 @@ class GoogleNewsRss:
     """Per-entity headline search via Google News RSS."""
 
     source_id = "news.google_news_rss"
-    source_type = SourceType.RSS
+    source_type = SourceType.SCRAPE
 
     def fetch(self, ctx: FetchContext) -> Iterator[RawRecord]:
         for entity in ctx.resolver.all():
             if not entity.name:
                 continue
             url = f"{BASE}?q={_query(entity.name)}&hl=en-US&gl=US&ceid=US:en"
-            text = ctx.http.get_text(url, policy=ctx.rate_policy)
-            for spec in parse(text):
+            adaptor = ctx.scraper.fetch_html(url, policy=ctx.rate_policy)
+            for spec in parse(adaptor):
                 spec.entities = [entity]
                 spec.url = url
                 yield build_record(ctx, self.source_id, self.source_type, spec)

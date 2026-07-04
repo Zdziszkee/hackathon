@@ -3,6 +3,9 @@
 Per-company search-interest time series requires the explore/token flow which
 is fragile (spec calls pytrends "archived/unmaintained"); the robust public
 endpoint is the daily-trends list. Per-company time series is a TODO.
+
+Fetched via scrapling (:class:`~ews_ingest.core.scrape.Scraper`) rather than
+plain httpx: Google aggressively rate-limits/blocks non-browser traffic.
 """
 
 from __future__ import annotations
@@ -20,9 +23,10 @@ __all__ = ["GoogleTrends", "parse"]
 DAILY_URL = "https://trends.google.com/trends/api/dailytrends"
 
 
-def parse(text: str) -> list[RecordInput]:
+def parse(adaptor: object) -> list[RecordInput]:
     """Strip the XSSI guard ``)]\\n,`` and parse the daily-trends payload."""
-    body = text
+    raw_body = getattr(adaptor, "body", b"") or b""
+    body = raw_body.decode("utf-8", errors="replace") if isinstance(raw_body, bytes) else str(raw_body)
     guard = body.find(",")
     if guard != -1 and body.lstrip().startswith(")"):
         body = body[guard + 1 :]
@@ -54,7 +58,7 @@ class GoogleTrends:
 
     def fetch(self, ctx: FetchContext) -> Iterator[RawRecord]:
         url = f"{DAILY_URL}?hl=en-US&geo=US"
-        text = ctx.http.get_text(url, policy=ctx.rate_policy)
-        for spec in parse(text):
+        adaptor = ctx.scraper.fetch_html(url, policy=ctx.rate_policy)
+        for spec in parse(adaptor):
             spec.url = url
             yield build_record(ctx, self.source_id, self.source_type, spec)
