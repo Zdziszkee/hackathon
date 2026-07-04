@@ -12,31 +12,37 @@
   cik: "0001090727"
   extra_ids:
     sector: transport_logistics
+    country: US
 - name: FedEx
   ticker: FDX
   cik: "0001048911"
   extra_ids:
     sector: transport_logistics
+    country: US
 - name: J.B. Hunt Transport Services
   ticker: JBHT
   cik: "0000728535"
   extra_ids:
     sector: transport_logistics
+    country: US
 - name: Knight-Swift Transportation Holdings
   ticker: KNX
   cik: "0001492562"
   extra_ids:
     sector: transport_logistics
+    country: US
 - name: Old Dominion Freight Line
   ticker: ODFL
   cik: "0000879089"
   extra_ids:
     sector: transport_logistics
+    country: US
 - name: Forward Air
   ticker: FWRD
   cik: "0001019528"
   extra_ids:
     sector: transport_logistics
+    country: US
     note: interpreted from "fresight" in spec; verify intent
 
 # --- 2. Airlines ---
@@ -45,26 +51,31 @@
   cik: "0000027904"
   extra_ids:
     sector: airlines
+    country: US
 - name: United Airlines Holdings
   ticker: UAL
   cik: "0000100517"
   extra_ids:
     sector: airlines
+    country: US
 - name: American Airlines Group
   ticker: AAL
   cik: "0000006201"
   extra_ids:
     sector: airlines
+    country: US
 - name: Southwest Airlines
   ticker: LUV
   cik: "0000092380"
   extra_ids:
     sector: airlines
+    country: US
 - name: JetBlue Airways
   ticker: JBLU
   cik: "0001158463"
   extra_ids:
     sector: airlines
+    country: US
 
 # --- 3. Petrochemical ---
 - name: Exxon Mobil
@@ -72,36 +83,43 @@
   cik: "0000034088"
   extra_ids:
     sector: petrochemical
+    country: US
 - name: Chevron
   ticker: CVX
   cik: "0000093410"
   extra_ids:
     sector: petrochemical
+    country: US
 - name: Dow Inc
   ticker: DOW
   cik: "0001751788"
   extra_ids:
     sector: petrochemical
+    country: US
 - name: LyondellBasell Industries
   ticker: LYB
   cik: "0001521332"
   extra_ids:
     sector: petrochemical
+    country: US
 - name: Westlake Corporation
   ticker: WLK
   cik: "0001579206"
   extra_ids:
     sector: petrochemical
+    country: US
 - name: Eastman Chemical Company
   ticker: EMN
   cik: "0001011438"
   extra_ids:
     sector: petrochemical
+    country: US
 - name: Celanese
   ticker: CE
   cik: "0001415536"
   extra_ids:
     sector: petrochemical
+    country: US
 - name: CF Industries Holdings
   ticker: CF
   cik: "0001324404"

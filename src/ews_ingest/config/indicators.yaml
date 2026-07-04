@@ -1,0 +1,35 @@
+# Dashboard indicator bindings (role -> source_id), portfolio-wide.
+#
+# Consumed ONLY by the dashboard (src/ews_ingest/dashboard). The ingestion layer
+# is unaffected — it continues to be driven by sources.yaml + `python -m
+# ews_ingest run <id>`.
+#
+# The portfolio is cross-region as a whole; a single binding applies to every
+# borrower. A role left unset (`~`) means "not available" — the indicator
+# renders as such instead of crashing. A role pointing at a source_id that has
+# not landed any records yet degrades to a labeled demo value.
+#
+# Adding a new source for a category: register the connector (existing
+# @register_source pattern) and re-point the role here. No indicator code
+# changes. Adding a new indicator: drop a file in `signals/` and add its role.
+#
+# Roles are surfaced by SignalProvider modules via `SignalContext.source_for(role)`.
+
+roles:
+  macro.mfg_pmi: macro.ism_pmi
+  supply_chain.pressure: supply_chain.lead_time
+  supply_chain.new_orders: macro.ism_pmi
+  supply_chain.supplier_deliveries: macro.ism_pmi
+  credit.ohlcv: credit_market.yahoo
+  credit.spreads: credit_market.fred_credit
+  news.distress: news.gdelt
+  sanctions: sanctions.opensanctions
+  industry.sic: universe.sec_sic_codes
+  industry.naics: universe.naics_census
+  industry.filer_sic: company_financials.submissions
+  financials.xbrl: company_financials.company_facts
+  identity.country: identity.wikidata
+  demand.air: transport.bts_air_consumer
+  demand.truck: transport.ata_tonnage
+  demand.freight_payments: transport.cass_freight
+  demand.chem: commodity.eia

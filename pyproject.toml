@@ -11,6 +11,7 @@ dependencies = [
     "pyyaml>=6.0.3",
     "scrapling[fetchers]>=0.4.9",
     "selectolax>=0.4.10",
+    "streamlit>=1.45.0",
     "tenacity>=9.1.4",
     "warcio>=1.8.1",
 ]
@@ -78,6 +79,18 @@ ignore = [
 "src/ews_ingest/cli.py" = ["T201"]
 "src/ews_ingest/__main__.py" = ["T201"]
 "src/ews_ingest/tools/**" = ["T201"]
+"src/ews_ingest/dashboard/app.py" = ["T201", "C901", "PLR2004", "PLC0415", "PLR0912", "PLR0915"]
+"src/ews_ingest/dashboard/signals/**" = [
+    "PLR2004",
+    "ANN401",
+    "C901",
+    "PLR0911",
+    "PLR0912",
+    "PLR0913",
+    "E501",
+]
+"src/ews_ingest/dashboard/icons.py" = ["E501", "N802", "RUF002"]
+"src/ews_ingest/dashboard/ui.py" = ["PLC0415", "PLR2004", "PLR0913", "E501"]
 "**/main.py" = ["T201"]
 
 [tool.pytest.ini_options]

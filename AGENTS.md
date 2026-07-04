@@ -27,6 +27,20 @@ Common commands:
 - Check missing env vars: `uv run --env-file .env python -m ews_ingest validate`
 - Run one source: `uv run --env-file .env python -m ews_ingest run <source_id>`
 
+## Dashboard
+
+Streamlit portfolio-risk dashboard under `src/ews_ingest/dashboard/`. Reads
+landed JSONL (`data/landing/`) and aggregates per-company risk indicators.
+
+- Run: `uv run --env-file .env streamlit run src/ews_ingest/dashboard/app.py`
+
+Indicators are pluggable `SignalProvider` modules, auto-discovered under
+`src/ews_ingest/dashboard/signals/`. Role -> source_id bindings live in
+`src/ews_ingest/config/indicators.yaml` (portfolio-wide, cross-region). To swap
+a source for a category / add an indicator, edit that YAML or drop a new file
+in `signals/` respectively — no central code changes. Landing zone empty ->
+demo fallback.
+
 ## Style
 
 Strict typing. Rules enabled as errors in `[tool.ty.rules]` and `[tool.ruff.lint]` in `pyproject.toml`.
