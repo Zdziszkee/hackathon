@@ -50,21 +50,21 @@ class FetchMode(StrEnum):
 class Scraper:
     """Fetch HTML via scrapling's fetchers; reuse shared HttpClient rate limits."""
 
-    def __init__(self, http: HttpClient, *, timeout: int = 30, use_real_chrome: bool = True) -> None:
+    def __init__(
+        self,
+        http: HttpClient,
+        *,
+        timeout: int = 30,
+        use_real_chrome: bool = True,
+    ) -> None:
         self._http = http
         self._timeout = timeout
         self._use_real_chrome = use_real_chrome
 
-    def _limiter(self, policy: RatePolicy) -> object:
-        # Reuse the private GCRA limiter on the shared HttpClient so per-host
-        # throttling stays unified across httpx + scrapling transports.
-        return self._http._limiter(policy)  # noqa: SLF001 - intentional shared-limiter reuse
-
     def _headers_for(self, url: str, headers: dict[str, str] | None) -> dict[str, str] | None:
         merged = dict(headers) if headers else {}
         if "sec.gov" in url:
-            sec_ua = self._http._sec_user_agent  # noqa: SLF001
-            merged.setdefault("User-Agent", sec_ua)
+            merged.setdefault("User-Agent", self._http.sec_user_agent)
         return merged or None
 
     def fetch_html(
@@ -86,7 +86,7 @@ class Scraper:
             For ``STEALTH``/``DYNAMIC`` modes only — wait for network-idle
             before returning (useful for JS-rendered content).
         """
-        self._limiter(policy).acquire()  # type: ignore[attr-defined]
+        self._http.acquire(policy)
         scraped_headers = self._headers_for(url, headers)
         if mode is FetchMode.HTTP:
             page = Fetcher.get(

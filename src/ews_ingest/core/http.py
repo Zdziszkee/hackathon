@@ -62,6 +62,24 @@ class HttpClient:
         self._sec_user_agent = sec_user_agent or "ews-ingest contact@example.com"
 
     def _limiter(self, policy: RatePolicy) -> _HostLimiter:
+        limiter = self._limiters.get(policy.host)
+        if limiter is None:
+            limiter = _HostLimiter(policy.rps, policy.burst)
+            self._limiters[policy.host] = limiter
+        return limiter
+
+    @property
+    def sec_user_agent(self) -> str:
+        """The descriptive User-Agent required for sec.gov/data.sec.gov hosts."""
+        return self._sec_user_agent
+
+    def acquire(self, policy: RatePolicy) -> None:
+        """Acquire a rate-limit token for ``policy.host`` (blocks if needed).
+
+        Exposed so other transports (e.g. :class:`~ews_ingest.core.scrape.Scraper`)
+        can share this client's per-host limiters without reaching into internals.
+        """
+        self._limiter(policy).acquire()
 
     def _headers_for(self, url: str, headers: dict[str, str] | None) -> dict[str, str]:
         merged = dict(headers or {})
