@@ -1,0 +1,20 @@
+{
+  "articles": [
+    {
+      "url": "https://example.com/news/1",
+      "title": "Carrier files for bankruptcy protection",
+      "seendate": "20240101T120000Z",
+      "language": "English",
+      "tone": -7.5,
+      "themes": "BANKRUPTCY,EXPORT,ECON"
+    },
+    {
+      "url": "https://example.com/news/2",
+      "title": "Airline announces layoffs",
+      "seendate": "20240201T090000Z",
+      "language": "English",
+      "tone": -4.2,
+      "themes": "EMPLOYEE,FINANCIAL"
+    }
+  ]
+}

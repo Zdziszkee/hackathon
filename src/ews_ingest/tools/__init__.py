@@ -1,0 +1,1 @@
+"""Tooling: registry/config generation."""

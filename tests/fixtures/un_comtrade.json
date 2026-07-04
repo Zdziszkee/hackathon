@@ -1,0 +1,7 @@
+{
+  "validation": {"status": {"name": "Ok", "value": 0}, "message": null},
+  "dataset": [
+    {"pfCode": "HS", "rtCode": 842, "rtTitle": "USA", "ptCode": 276, "ptTitle": "Germany", "rgCode": 1, "rgDesc": "Import", "cmdCode": "27", "cmdDesc": "Mineral fuels, mineral oils", "period": "2022", "TradeValue": 150000000000, "NetWeight": 1000000000},
+    {"pfCode": "HS", "rtCode": 842, "rtTitle": "USA", "ptCode": 156, "ptTitle": "China", "rgCode": 2, "rgDesc": "Export", "cmdCode": "87", "cmdDesc": "Vehicles other than railway", "period": "2022", "TradeValue": 45000000000, "NetWeight": 200000000}
+  ]
+}

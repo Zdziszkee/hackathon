@@ -1,0 +1,16 @@
+{
+  "cik": "1090727",
+  "name": "UNITED PARCEL SERVICE INC",
+  "tickers": ["UPS"],
+  "exchanges": ["NYSE"],
+  "sicDescription": "Courier Services, Except by Air",
+  "files": {
+    "filingCount": "1234",
+    "recent": {
+      "form": ["10-K", "10-Q", "8-K"],
+      "accessionNumber": ["0000109072-23-000001", "0000109072-23-000002", "0000109072-23-000003"],
+      "filingDate": ["2023-03-01", "2023-05-01", "2023-06-15"],
+      "primaryDocument": ["ups-20221231.htm", "ups-20230331.htm", "ups-8k.htm"]
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "response": {
+    "total": 2,
+    "data": [
+      {"period": "2024-01-02", "product": "Brent", "value": 77.04, "series": "RBRTE.D"},
+      {"period": "2024-01-03", "product": "Brent", "value": 78.21, "series": "RBRTE.D"}
+    ]
+  }
+}

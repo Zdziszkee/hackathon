@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<title>GDACS</title>
+<description>Global Disaster Alerts</description>
+<item>
+<title>Saudi Arabia: Tropical Cyclone (2024-01-15)</title>
+<link>https://www.gdacs.org/report.aspx?eventid=12345&amp;episodeid=1&amp;profile=CYCLONE&amp;sourcesystemid=2</link>
+<pubDate>Mon, 15 Jan 2024 12:00:00 GMT</pubDate>
+<summary>Category 1 cyclone approaching petrochemical port facilities</summary>
+</item>
+<item>
+<title>Indonesia: Volcanic Eruption (2024-02-01)</title>
+<link>https://www.gdacs.org/report.aspx?eventid=12346&amp;episodeid=1&amp;profile=VOLCANO&amp;sourcesystemid=2</link>
+<pubDate>Thu, 01 Feb 2024 06:00:00 GMT</pubDate>
+<summary>Volcanic eruption near shipping lane</summary>
+</item>
+</channel>
+</rss>

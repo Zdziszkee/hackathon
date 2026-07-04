@@ -6,3 +6,7 @@ __pycache__/
 .ty_cache/
 dist/
 build/
+
+# Landing zone (raw data; never commit)
+data/
+tests/_landing/

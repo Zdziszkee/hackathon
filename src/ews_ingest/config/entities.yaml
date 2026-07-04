@@ -1,0 +1,109 @@
+# Seeded borrower universe for the prototype (US petrochem + transport).
+# Tickers are Yahoo Finance symbols (the authoritative ID for this iteration).
+# CIKs are best-effort from memory — VERIFY against SEC company_tickers.json (the
+# `universe.sec_company_tickers` connector enriches CIK from ticker automatically)
+# before relying on them for live SEC calls. LEI / USDOT# / EPA FRS ID are left null
+# to be filled from GLEIF / FMCSA Census / EPA FRS once those connectors land data.
+# `extra_ids` carries non-standard cross-source keys (sector, ir_url, etc.).
+
+# --- 1. Transport & Logistics ---
+- name: United Parcel Service
+  ticker: UPS
+  cik: "0001090727"
+  extra_ids:
+    sector: transport_logistics
+- name: FedEx
+  ticker: FDX
+  cik: "0001048911"
+  extra_ids:
+    sector: transport_logistics
+- name: J.B. Hunt Transport Services
+  ticker: JBHT
+  cik: "0000728535"
+  extra_ids:
+    sector: transport_logistics
+- name: Knight-Swift Transportation Holdings
+  ticker: KNX
+  cik: "0001492562"
+  extra_ids:
+    sector: transport_logistics
+- name: Old Dominion Freight Line
+  ticker: ODFL
+  cik: "0000879089"
+  extra_ids:
+    sector: transport_logistics
+- name: Forward Air
+  ticker: FWRD
+  cik: "0001019528"
+  extra_ids:
+    sector: transport_logistics
+    note: interpreted from "fresight" in spec; verify intent
+
+# --- 2. Airlines ---
+- name: Delta Air Lines
+  ticker: DAL
+  cik: "0000027904"
+  extra_ids:
+    sector: airlines
+- name: United Airlines Holdings
+  ticker: UAL
+  cik: "0000100517"
+  extra_ids:
+    sector: airlines
+- name: American Airlines Group
+  ticker: AAL
+  cik: "0000006201"
+  extra_ids:
+    sector: airlines
+- name: Southwest Airlines
+  ticker: LUV
+  cik: "0000092380"
+  extra_ids:
+    sector: airlines
+- name: JetBlue Airways
+  ticker: JBLU
+  cik: "0001158463"
+  extra_ids:
+    sector: airlines
+
+# --- 3. Petrochemical ---
+- name: Exxon Mobil
+  ticker: XOM
+  cik: "0000034088"
+  extra_ids:
+    sector: petrochemical
+- name: Chevron
+  ticker: CVX
+  cik: "0000093410"
+  extra_ids:
+    sector: petrochemical
+- name: Dow Inc
+  ticker: DOW
+  cik: "0001751788"
+  extra_ids:
+    sector: petrochemical
+- name: LyondellBasell Industries
+  ticker: LYB
+  cik: "0001521332"
+  extra_ids:
+    sector: petrochemical
+- name: Westlake Corporation
+  ticker: WLK
+  cik: "0001579206"
+  extra_ids:
+    sector: petrochemical
+- name: Eastman Chemical Company
+  ticker: EMN
+  cik: "0001011438"
+  extra_ids:
+    sector: petrochemical
+- name: Celanese
+  ticker: CE
+  cik: "0001415536"
+  extra_ids:
+    sector: petrochemical
+- name: CF Industries Holdings
+  ticker: CF
+  cik: "0001324404"
+  extra_ids:
+    sector: petrochemical
