@@ -4,35 +4,38 @@ Rebuilt from scratch: a single centered column, symmetric KPI strip, smooth
 spline chart with red gradient fill, transaction-style risk borrower list,
 and collapsible company detail cards. No sidebar, no right rail.
 
-Color: one brand red (#DB0011), white cards on light grey, black ink, grey
-secondary text. Green/red are directional only (trend arrows). Typography is
-Univers/Helvetica Neue/Arial. Radii are subtle (8px cards, 12px credit-card,
-round pills/avatars). Soft diffuse shadows, generous whitespace.
+Color: brand red (#DB0011) for bad, green (#29B32E) for good, yellow
+(#FFF34A) for warning. White cards on light grey, black ink, grey secondary
+text. Univers/Helvetica Neue/Arial. Radii are subtle (8px cards, round pills).
+Soft diffuse shadows.
 """
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Iterable
+from pathlib import Path
 
 import streamlit as st
 
 from ews_ingest.dashboard.icons import (
     STATUS_ICON,
-    ic_activity,
     ic_alert,
-    ic_bar_chart,
-    ic_boxes,
     ic_chevron_down,
-    ic_factory,
+    ic_dollar,
     ic_file_text,
     ic_gauge,
+    ic_gavel,
     ic_info,
+    ic_landmark,
+    ic_line_chart,
     ic_map_pin,
+    ic_message,
     ic_minus,
     ic_newspaper,
-    ic_scale,
     ic_shield,
-    ic_trending,
+    ic_truck,
+    ic_zap,
 )
 from ews_ingest.dashboard.signals.protocol import SignalResult
 from ews_ingest.dashboard.stats import PortfolioStats, SectorStat
@@ -46,12 +49,19 @@ __all__ = [
 ]
 
 # ---------------------------------------------------------------------------
-# Status palette — red is the only saturated hue; green is directional only
+# Status palette — green=good, yellow=warning, red=bad, grey=neutral
 # ---------------------------------------------------------------------------
+
+_C_WARN = "#FFF34A"
+_C_WARN_FG = "#CA9A00"
 
 _STATUS = {
     "good": {"fg": "#29B32E", "bg": "rgba(41,179,46,0.10)", "bd": "rgba(41,179,46,0.22)"},
-    "warning": {"fg": "#B86E00", "bg": "rgba(184,110,0,0.10)", "bd": "rgba(184,110,0,0.24)"},
+    "warning": {
+        "fg": _C_WARN_FG,
+        "bg": "rgba(255,243,74,0.12)",
+        "bd": "rgba(255,243,74,0.30)",
+    },
     "bad": {"fg": "#DB0011", "bg": "rgba(219,0,17,0.08)", "bd": "rgba(219,0,17,0.22)"},
     "demo": {"fg": "#9FA1A4", "bg": "rgba(159,161,164,0.08)", "bd": "rgba(159,161,164,0.18)"},
     "unavailable": {
@@ -61,20 +71,38 @@ _STATUS = {
     },
 }
 
-# Indicator id -> (icon fn, tint)
+# Indicator icons are all grey — no per-indicator color tinting.
 _IND_ICON = {
-    "country": (ic_map_pin, "#2563EB"),
-    "industry": (ic_factory, "#7C3AED"),
-    "volatility": (ic_trending, "#DB0011"),
-    "geopolitical": (ic_shield, "#EA580C"),
-    "general_demand": (ic_trending, "#29B32E"),
-    "regulation": (ic_scale, "#B86E00"),
-    "supply_chain": (ic_boxes, "#0891B2"),
-    "profitability": (ic_bar_chart, "#65A30D"),
-    "macro_health": (ic_activity, "#DB0011"),
-    "news_sentiment": (ic_newspaper, "#9333EA"),
-    "ism": (ic_activity, "#0EA5E9"),
+    "country": ic_map_pin,
+    "industry": ic_landmark,
+    "volatility": ic_zap,
+    "geopolitical": ic_shield,
+    "general_demand": ic_line_chart,
+    "regulation": ic_gavel,
+    "supply_chain": ic_truck,
+    "profitability": ic_dollar,
+    "macro_health": ic_gauge,
+    "news_sentiment": ic_message,
+    "ism": ic_line_chart,
 }
+
+# Grey tint for all indicator icon tiles
+_IC_TINT = "#9FA1A4"
+
+# ---------------------------------------------------------------------------
+# HSBC logo (base64-embedded for inline HTML)
+# ---------------------------------------------------------------------------
+
+_LOGO_PATH = Path(__file__).resolve().parent / "assets" / "hsbc_logo.webp"
+
+
+def _logo_b64() -> str:
+    """Return the HSBC logo as a base64-encoded data URI, or empty string."""
+    if not _LOGO_PATH.exists():
+        return ""
+    data = base64.b64encode(_LOGO_PATH.read_bytes()).decode("ascii")
+    return f"data:image/webp;base64,{data}"
+
 
 # ---------------------------------------------------------------------------
 # Theme CSS
@@ -84,11 +112,11 @@ _THEME_CSS = """
 <style>
 :root{
   --brand-red:#DB0011; --brand-red-dark:#B4000E; --brand-red-tint:rgba(219,0,17,.08);
-  --success:#29B32E; --warn:#B86E00;
+  --success:#29B32E; --warn:#FFF34A; --info:#2563EB;
   --ink-900:#1A1A1A; --ink-700:#333333; --ink-500:#9FA1A4; --ink-400:#BFC1C4;
   --line-200:#E6E6E6; --line-soft:#F0F0F0; --tile-100:#F7F7F7;
   --page-bg:#F5F5F5; --card-bg:#FFFFFF;
-  --radius-card:8px; --radius-pill:999px; --radius-input:6px; --radius-cc:12px;
+  --radius-card:8px; --radius-pill:999px; --radius-input:6px;
   --shadow-card:0 4px 12px rgba(0,0,0,0.03);
   --shadow-hover:0 6px 16px rgba(0,0,0,0.05);
 }
@@ -173,8 +201,9 @@ details[data-testid="stExpander"] [data-testid="stExpanderDetails"]{ padding:0 2
 
 /* ---- Component classes ---- */
 
-/* Page header — centered */
+/* Page header — centered, with HSBC logo */
 .pb-header{ text-align:center; margin:8px 0 36px; }
+.pb-header img.pb-logo{ height:48px; margin:0 auto 16px; display:block; }
 .pb-header h1{ font-size:28px; font-weight:700; color:var(--ink-900); margin:0 0 6px; letter-spacing:-0.01em; }
 .pb-header p{ font-size:14px; color:var(--ink-500); margin:0; }
 
@@ -190,7 +219,7 @@ details[data-testid="stExpander"] [data-testid="stExpanderDetails"]{ padding:0 2
 .pb-card-title::before{
   content:""; width:4px; height:16px; background:var(--brand-red); border-radius:2px;
 }
-.pb-card-sub{ font-size:12px; color:var(--ink-500); margin-left:auto; }
+.pb-card-sub{ font-size:12px; color:var(--ink-500); margin-left:auto; padding-left:12px; }
 
 /* KPI cards — centered text, stacked vertically */
 .pb-kpi{
@@ -253,13 +282,22 @@ details[data-testid="stExpander"] [data-testid="stExpanderDetails"]{ padding:0 2
   padding:6px 14px; font-size:13px; color:var(--ink-700); font-weight:500;
 }
 
-/* Company detail card */
-.pb-co-card{
+/* Company detail card — collapsible via native <details> */
+details.pb-co-card{
   background:var(--card-bg); border-radius:var(--radius-card); box-shadow:var(--shadow-card);
   overflow:hidden; margin-bottom:16px;
 }
-.pb-co-head{ display:flex; align-items:center; gap:16px; padding:20px 24px; cursor:pointer; }
-.pb-co-head:hover{ background:var(--line-soft); }
+details.pb-co-card > summary{
+  list-style:none; cursor:pointer; outline:none;
+  display:flex; align-items:center; gap:16px; padding:20px 24px;
+  transition:background .15s ease;
+}
+details.pb-co-card > summary::-webkit-details-marker{ display:none; }
+details.pb-co-card > summary::marker{ content:""; }
+details.pb-co-card > summary:hover{ background:var(--line-soft); }
+details.pb-co-card[open] > summary{ border-bottom:1px solid var(--line-soft); }
+.pb-co-chev{ color:var(--ink-400); transition:transform .15s ease; display:inline-flex; flex-shrink:0; margin-left:8px; }
+details.pb-co-card[open] > summary .pb-co-chev{ transform:rotate(180deg); }
 .pb-co-score{
   width:48px; height:48px; border-radius:6px;
   display:flex; align-items:center; justify-content:center;
@@ -275,6 +313,10 @@ details[data-testid="stExpander"] [data-testid="stExpanderDetails"]{ padding:0 2
 
 /* Indicator rows */
 .pb-rows{ padding:0 12px 16px; }
+details.pb-row{ padding:0; }
+details.pb-row > summary{ list-style:none; outline:none; }
+details.pb-row > summary::-webkit-details-marker{ display:none; }
+details.pb-row > summary::marker{ content:""; }
 .pb-row{
   display:grid; grid-template-columns:1fr auto 110px 22px; align-items:center; gap:14px;
   padding:12px; cursor:pointer;
@@ -314,32 +356,20 @@ details.pb-row[open] > summary .pb-row-chev{ transform:rotate(180deg); }
   font-size:11px; color:var(--ink-500); font-family:"JetBrains Mono",ui-monospace,monospace;
 }
 
-/* Credit card visual */
-.pb-cc{
-  background:var(--brand-red); border-radius:var(--radius-cc); padding:24px; color:#fff;
-  display:flex; flex-direction:column; gap:16px; min-height:180px; position:relative; overflow:hidden;
-}
-.pb-cc::before{
-  content:""; position:absolute; top:-20px; right:-20px; width:160px; height:160px;
-  border-radius:50%; background:rgba(255,255,255,0.06);
-}
-.pb-cc::after{
-  content:""; position:absolute; bottom:-60px; left:-30px; width:200px; height:200px;
-  border-radius:50%; background:rgba(255,255,255,0.04);
-}
-.pb-cc > *{ position:relative; z-index:1; }
-.pb-cc-top{ display:flex; justify-content:space-between; align-items:center; }
-.pb-cc-mark{ font-size:10px; font-weight:800; letter-spacing:0.16em; }
-.pb-cc-chip{ width:28px; height:22px; border-radius:4px; background:rgba(255,255,255,0.25); }
-.pb-cc-num{ font-size:17px; font-weight:600; letter-spacing:2px; }
-.pb-cc-row{ display:flex; justify-content:space-between; align-items:baseline; font-size:12px; }
-.pb-cc-row .lbl{ font-size:9px; letter-spacing:0.1em; opacity:0.7; margin-bottom:3px; }
-.pb-cc-row .val{ font-size:13px; font-weight:600; }
-.pb-cc-btn{
-  background:#fff; color:var(--brand-red); border:none; border-radius:6px;
-  padding:10px; font-size:14px; font-weight:600; cursor:pointer; width:100%; text-align:center;
-}
-.pb-cc-btn:hover{ background:#FDF0F1; }
+/* Risk exposure card — replaces the credit-card visual */
+.pb-expose{ display:flex; flex-direction:column; gap:16px; }
+.pb-donut-wrap{ display:flex; align-items:center; justify-content:center; gap:16px; }
+.pb-donut-center{ text-align:center; }
+.pb-donut-center .num{ font-size:28px; font-weight:700; color:var(--ink-900); line-height:1; }
+.pb-donut-center .lbl{ font-size:12px; color:var(--ink-500); margin-top:2px; }
+.pb-expose-legend{ display:flex; flex-direction:column; gap:8px; }
+.pb-expose-leg-item{ display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-700); }
+.pb-expose-leg-dot{ width:10px; height:10px; border-radius:2px; flex-shrink:0; }
+.pb-expose-leg-num{ margin-left:auto; font-weight:700; color:var(--ink-900); }
+.pb-expose-stats{ display:flex; gap:12px; margin-top:4px; }
+.pb-expose-stat{ flex:1; text-align:center; }
+.pb-expose-stat .v{ font-size:18px; font-weight:700; color:var(--ink-900); }
+.pb-expose-stat .l{ font-size:11px; color:var(--ink-500); margin-top:2px; }
 
 /* Add-company toolbar */
 .pb-toolbar{ display:flex; gap:10px; margin-bottom:24px; }
@@ -539,10 +569,12 @@ def _bar_chart_svg(
 
 
 def render_topbar(n_companies: int, n_sources: int = 0) -> None:
-    """Centered page header: title + subtitle. No breadcrumb, no sidebar."""
+    """Centered page header: HSBC logo, title + subtitle."""
     _ = (n_companies, n_sources)
+    logo_uri = _logo_b64()
+    logo_html = f'<img class="pb-logo" src="{logo_uri}" alt="HSBC" />' if logo_uri else ""
     st.markdown(
-        '<div class="pb-header"><h1>Portfolio Risk Dashboard</h1>'
+        f'<div class="pb-header">{logo_html}<h1>Portfolio Risk Dashboard</h1>'
         "<p>Cross-region wholesale credit early-warning signals</p></div>",
         unsafe_allow_html=True,
     )
@@ -582,19 +614,19 @@ def _txn_html(rank: int, name: str, score: float, sector: str, status: str) -> s
     positive = status == "good"
     glyph = "\u2197" if positive else "\u2198"
     sector_pretty = _display_sector(sector)
-    return f"""
-    <div class="pb-txn">
-      <div class="pb-txn-icon" style="color:{fg}">{glyph}</div>
-      <div class="pb-txn-info">
-        <div class="pb-txn-name">{rank}. {_esc(name)}</div>
-        <div class="pb-txn-date">{sector_pretty} \u00b7 composite risk</div>
-      </div>
-      <div style="text-align:right;">
-        <div class="pb-txn-amt" style="color:{fg}">{score:.0f}</div>
-        <div class="pb-txn-amt-sub">{status}</div>
-      </div>
-    </div>
-    """
+    return (
+        f'<div class="pb-txn">'
+        f'<div class="pb-txn-icon" style="color:{fg}">{glyph}</div>'
+        f'<div class="pb-txn-info">'
+        f'<div class="pb-txn-name">{rank}. {_esc(name)}</div>'
+        f'<div class="pb-txn-date">{sector_pretty} \u00b7 composite risk</div>'
+        f"</div>"
+        f'<div style="text-align:right;">'
+        f'<div class="pb-txn-amt" style="color:{fg}">{score:.0f}</div>'
+        f'<div class="pb-txn-amt-sub">{status}</div>'
+        f"</div>"
+        f"</div>"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -633,24 +665,98 @@ def _distribution_html(stats: PortfolioStats) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Credit card visual (solid red, centered, "Activate" button)
+# Risk exposure card (replaces the credit-card visual)
 # ---------------------------------------------------------------------------
 
 
-def _credit_card_html(stats: PortfolioStats) -> str:
+def _donut_svg(
+    segments: list[tuple[float, str]],
+    size: int = 120,
+    stroke: int = 16,
+) -> str:
+    """A simple donut chart: ``segments`` = [(fraction, color), ...].
+
+    Fractions must sum to <= 1.0. Drawn via stacked <circle> with
+    stroke-dasharray for each arc segment.
+    """
+    r = (size - stroke) / 2
+    cx = size / 2
+    circ = 2 * 3.14159265 * r
+    total = sum(f for f, _ in segments) or 1.0
+    offset = 0.0
+    arcs = ""
+    for frac, color in segments:
+        if frac <= 0:
+            continue
+        dash = frac / total * circ
+        arcs += (
+            f'<circle cx="{cx}" cy="{cx}" r="{r:.1f}" fill="none" '
+            f'stroke="{color}" stroke-width="{stroke}" '
+            f'stroke-dasharray="{dash:.1f} {circ - dash:.1f}" '
+            f'stroke-dashoffset="{-offset:.1f}" transform="rotate(-90 {cx} {cx})"/>'
+        )
+        offset += dash
+    return (
+        f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" '
+        f'role="img" aria-label="risk distribution donut">'
+        f'<circle cx="{cx}" cy="{cx}" r="{r:.1f}" fill="none" '
+        f'stroke="{"#F0F0F0"}" stroke-width="{stroke}"/>'
+        f"{arcs}</svg>"
+    )
+
+
+def _risk_exposure_html(stats: PortfolioStats) -> str:
+    """A donut chart of good/warning/bad borrower counts + a compact legend
+    and stat row. Replaces the credit-card widget — fits the risk theme."""
+    n = stats.n_companies or 1
+    good_f = stats.n_good / n
+    warn_f = stats.n_warning / n
+    bad_f = stats.n_bad / n
+    good_c = status_color("good")
+    warn_c = status_color("warning")
+    bad_c = status_color("bad")
+    segments = [(good_f, good_c), (warn_f, warn_c), (bad_f, bad_c)]
+    donut = _donut_svg(segments)
     worst = stats.worst_indicator_label or "\u2014"
+    sent_str = f"{stats.mean_sentiment:+.1f}" if stats.mean_sentiment is not None else "\u2014"
     return f"""
-    <div class="pb-cc">
-      <div class="pb-cc-top">
-        <div class="pb-cc-mark">PREMIER BANK</div>
-        <div class="pb-cc-chip"></div>
+    <div class="pb-card pb-expose">
+      <div class="pb-card-title">Risk exposure</div>
+      <div class="pb-donut-wrap">
+        {donut}
+        <div class="pb-donut-center">
+          <div class="num">{stats.n_companies}</div>
+          <div class="lbl">borrowers</div>
+        </div>
+        <div class="pb-expose-legend">
+          <div class="pb-expose-leg-item">
+            <span class="pb-expose-leg-dot" style="background:{good_c}"></span>
+            Good <span class="pb-expose-leg-num">{stats.n_good}</span>
+          </div>
+          <div class="pb-expose-leg-item">
+            <span class="pb-expose-leg-dot" style="background:{warn_c}"></span>
+            Warning <span class="pb-expose-leg-num">{stats.n_warning}</span>
+          </div>
+          <div class="pb-expose-leg-item">
+            <span class="pb-expose-leg-dot" style="background:{bad_c}"></span>
+            Bad <span class="pb-expose-leg-num">{stats.n_bad}</span>
+          </div>
+        </div>
       </div>
-      <div class="pb-cc-num">\u2022\u2022\u2022\u2022 \u2022\u2022\u2022\u2022 \u2022\u2022\u2022\u2022 {stats.n_companies:04d}</div>
-      <div class="pb-cc-row">
-        <div><div class="lbl">WORST INDICATOR</div><div class="val">{_esc(worst)}</div></div>
-        <div style="text-align:right;"><div class="lbl">EXPOSURE</div><div class="val">{stats.n_bad}.{stats.n_warning:02d}</div></div>
+      <div class="pb-expose-stats">
+        <div class="pb-expose-stat">
+          <div class="v">{stats.total_sanctions_flags}</div>
+          <div class="l">sanctions flags</div>
+        </div>
+        <div class="pb-expose-stat">
+          <div class="v">{sent_str}</div>
+          <div class="l">news bias</div>
+        </div>
+        <div class="pb-expose-stat">
+          <div class="v" style="font-size:14px;">{_esc(worst[:12])}</div>
+          <div class="l">worst indicator</div>
+        </div>
       </div>
-      <div class="pb-cc-btn">Activate card</div>
     </div>
     """
 
@@ -667,7 +773,7 @@ def render_portfolio_overview(stats: PortfolioStats) -> None:
     2. Chart card (spline line + bar, side by side)
     3. Risk breakdown + sector exposure (side by side)
     4. Top risk borrowers list (full width)
-    5. Credit card visual (centered)
+    5. Risk exposure donut card (centered)
     """
     mean_status = _composite_status(stats.mean_risk)
     mean_color = status_color(mean_status)
@@ -717,7 +823,7 @@ def render_portfolio_overview(stats: PortfolioStats) -> None:
     # Bar chart: sector mean risk bars colored by status
     bar_labels = spline_labels
     bar_values = spline_values
-    bar_colors = [status_color(_composite_status(v)) for v in bar_values]
+    bar_colors = ["#DB0011"] * len(bar_values)
     bar_svg = _bar_chart_svg(bar_labels, bar_values, bar_colors)
 
     # Split: spline left, bar right — symmetric
@@ -802,7 +908,7 @@ def render_portfolio_overview(stats: PortfolioStats) -> None:
             unsafe_allow_html=True,
         )
     with bottom_cols[1]:
-        st.markdown(_credit_card_html(stats), unsafe_allow_html=True)
+        st.markdown(_risk_exposure_html(stats), unsafe_allow_html=True)
 
     # -- Stat chips (centered, full width) --
     chips_parts: list[str] = []
@@ -844,8 +950,9 @@ def _row_html(
     tok = _token(result.status)
     fg = tok["fg"]
     status_ic = STATUS_ICON.get(result.status, ic_minus)(14)
-    topic_ic_fn, tint = _IND_ICON.get(indicator_id, (ic_gauge, "#9FA1A4"))
+    topic_ic_fn = _IND_ICON.get(indicator_id, ic_gauge)
     topic_ic = topic_ic_fn(16)
+    tint = _IC_TINT
 
     badges = _status_badge(result.status)
     if result.status == "demo":
@@ -856,7 +963,7 @@ def _row_html(
     if result.missing_env:
         badges += (
             '<span class="pb-row-badge" '
-            'style="background:rgba(184,110,0,.08);color:#B86E00;border:1px solid rgba(184,110,0,.22);">key</span>'
+            'style="background:rgba(255,243,74,.12);color:#CA9A00;border:1px solid rgba(255,243,74,.30);">key</span>'
         )
 
     mid = f'<span><span class="pb-row-val">{_esc(result.value)}</span>{badges}</span>'
@@ -940,8 +1047,8 @@ def render_company_card(
         )
 
     html = f"""
-    <div class="pb-co-card">
-      <div class="pb-co-head">
+    <details class="pb-co-card">
+      <summary>
         <div class="pb-co-score" style="background:{tok["bg"]};color:{fg}">{composite:.0f}</div>
         <div class="pb-co-titles">
           <div class="pb-co-name">{_esc(name)}</div>
@@ -956,9 +1063,10 @@ def render_company_card(
           <div class="pb-co-comp-num" style="color:{fg}">{composite:.0f}</div>
           <div class="pb-co-comp-lbl">composite / 100</div>
         </div>
-      </div>
+        <span class="pb-co-chev">{ic_chevron_down(20)}</span>
+      </summary>
       <div class="pb-rows">{body_rows}</div>
       {src_html}
-    </div>
+    </details>
     """
     st.markdown(html, unsafe_allow_html=True)

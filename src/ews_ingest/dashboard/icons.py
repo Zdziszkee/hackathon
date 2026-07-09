@@ -17,19 +17,26 @@ __all__ = [
     "ic_check",
     "ic_chevron_down",
     "ic_dashed",
+    "ic_dollar",
     "ic_error",
     "ic_factory",
     "ic_file_text",
     "ic_gauge",
+    "ic_gavel",
     "ic_globe",
     "ic_info",
+    "ic_landmark",
+    "ic_line_chart",
     "ic_map_pin",
+    "ic_message",
     "ic_minus",
     "ic_newspaper",
     "ic_scale",
     "ic_search",
     "ic_shield",
     "ic_trending",
+    "ic_truck",
+    "ic_zap",
 ]
 
 _VIEWBOX = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" '
@@ -201,6 +208,68 @@ def ic_globe(size: int = 16) -> str:
         '<circle cx="12" cy="12" r="10"/>'
         '<path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>'
         '<path d="M2 12h20"/>',
+    )
+
+
+def ic_dollar(size: int = 16) -> str:
+    return Icon(
+        size,
+        '<line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+    )
+
+
+def ic_gavel(size: int = 16) -> str:
+    return Icon(
+        size,
+        '<path d="m14.5 12.5-8 8a2.119 2.119 0 1 1-3-3l8-8"/>'
+        '<path d="m16 16 6-6"/><path d="m8 8 6-6"/>'
+        '<path d="m9 7 8 8"/><path d="m21 11-8-8"/>'
+        '<path d="M3 21h18"/>',
+    )
+
+
+def ic_landmark(size: int = 16) -> str:
+    return Icon(
+        size,
+        '<line x1="3" x2="21" y1="22" y2="22"/>'
+        '<line x1="6" x2="6" y1="18" y2="11"/>'
+        '<line x1="10" x2="10" y1="18" y2="11"/>'
+        '<line x1="14" x2="14" y1="18" y2="11"/>'
+        '<line x1="18" x2="18" y1="18" y2="11"/>'
+        '<polygon points="12 2 20 7 4 7"/>',
+    )
+
+
+def ic_line_chart(size: int = 16) -> str:
+    return Icon(
+        size,
+        '<path d="M3 3v18h18"/><path d="M7 14l3-3 3 3 5-5"/><path d="M18 9h2v2"/>',
+    )
+
+
+def ic_message(size: int = 16) -> str:
+    return Icon(
+        size,
+        '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>'
+        '<path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/>',
+    )
+
+
+def ic_truck(size: int = 16) -> str:
+    return Icon(
+        size,
+        '<path d="M5 18H3c-.6 0-1-.4-1-1V7c0-.6.4-1 1-1h10c.6 0 1 .4 1 1v11"/>'
+        '<path d="M14 9h4l4 4v4c0 .6-.4 1-1 1h-2"/>'
+        '<circle cx="7" cy="18" r="2"/>'
+        '<circle cx="17" cy="18" r="2"/>'
+        '<path d="M9 18h5"/>',
+    )
+
+
+def ic_zap(size: int = 16) -> str:
+    return Icon(
+        size,
+        '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
     )
 
 
