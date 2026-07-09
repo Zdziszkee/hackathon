@@ -513,17 +513,26 @@ def main() -> None:
         inject_theme,
         render_company_card,
         render_portfolio_overview,
+        render_topbar,
     )
 
-    st.set_page_config(page_title="Portfolio Risk Dashboard", page_icon="📊", layout="wide")
+    st.set_page_config(
+        page_title="Premier Bank",
+        page_icon="🛡️",
+        layout="wide",
+        initial_sidebar_state="collapsed",
+    )
     inject_theme()
 
     companies, landing, env, store, suggest = _cached_inputs()
 
-    # --- Add-company form (top-of-page, always visible) ------------------
+    # --- Single centered column: no sidebar, no right rail ---
+    render_topbar(len(companies))
+
+    # --- Add-company form ---
     _render_add_company_form(store, suggest)
 
-    # --- Onboarding status panels (one per in-flight task) ----------------
+    # --- Onboarding status panels (one per in-flight task) ---
     any_running = _render_onboarding_panels()
 
     providers = list_providers()
@@ -560,9 +569,6 @@ def main() -> None:
         is_refreshing = in_flight.get(ticker) is not None and (
             in_flight[ticker].status == "running"
         )
-        # Per-card refresh button. Disabled while a refresh is in flight so
-        # the user can't double-fire; the status panel above the cards
-        # shows live progress.
         refresh_cols = st.columns([8, 1])
         with refresh_cols[1]:
             if st.button(
@@ -575,9 +581,6 @@ def main() -> None:
                     else "A refresh is already in progress."
                 ),
             ):
-                # Re-resolve the identifier from the company store so we
-                # always pass the current `sector` (might have changed via
-                # the YAML/JSON pipeline).
                 _schedule_onboarding(company.identifiers)
                 st.rerun()
         with refresh_cols[0]:
@@ -591,14 +594,7 @@ def main() -> None:
                 _collect_sources(results),
             )
 
-    # Keep polling while tasks are in flight; each panel update triggers
-    # a rerun so the progress bar advances. ~1Hz cadence is plenty.
-    if any_running:
-        import time
-
-        time.sleep(1.0)
-        st.rerun()
-
+    # --- Methodology ---
     with st.expander("Methodology", expanded=False):
         st.markdown(
             """
@@ -634,6 +630,13 @@ from Yahoo Finance OHLCV (trailing 60 trading days).
 """
         )
 
+    # Keep polling while tasks are in flight.
+    if any_running:
+        import time
+
+        time.sleep(1.0)
+        st.rerun()
+
 
 def _render_add_company_form(store: CompanyStore, suggest: TickerSuggest) -> None:
     """Top-band form: ticker in -> resolved + persisted + cache busted.
@@ -653,7 +656,12 @@ def _render_add_company_form(store: CompanyStore, suggest: TickerSuggest) -> Non
             key="ews_add_company_ticker",
         )
     with cols[1]:
-        submitted = st.button("Add", use_container_width=True, key="ews_add_company_submit")
+        submitted = st.button(
+            "Add",
+            type="primary",
+            use_container_width=True,
+            key="ews_add_company_submit",
+        )
     with cols[2]:
         # Right-hand slot is informational only — keeps the form on one row.
         removed = st.button(

@@ -1,8 +1,13 @@
-"""Streamlit UI: minimal dark dashboard inspired by shadcn/ui, Lin/Anthropic.
+"""Premier Bank dashboard UI — clean, centered, HSBC-inspired.
 
-Design tokens (zinc grayscale + semantic accents), Lucide stroke icons, native
-``<details>`` as shadcn Collapsible, ``<summary>`` rows that rotate a chevron,
-and an expanded panel showing the indicator's detail dict + note + sources.
+Rebuilt from scratch: a single centered column, symmetric KPI strip, smooth
+spline chart with red gradient fill, transaction-style risk borrower list,
+and collapsible company detail cards. No sidebar, no right rail.
+
+Color: one brand red (#DB0011), white cards on light grey, black ink, grey
+secondary text. Green/red are directional only (trend arrows). Typography is
+Univers/Helvetica Neue/Arial. Radii are subtle (8px cards, 12px credit-card,
+round pills/avatars). Soft diffuse shadows, generous whitespace.
 """
 
 from __future__ import annotations
@@ -13,15 +18,14 @@ import streamlit as st
 
 from ews_ingest.dashboard.icons import (
     STATUS_ICON,
-    Icon,
     ic_activity,
+    ic_alert,
     ic_bar_chart,
     ic_boxes,
     ic_chevron_down,
     ic_factory,
     ic_file_text,
     ic_gauge,
-    ic_globe,
     ic_info,
     ic_map_pin,
     ic_minus,
@@ -37,292 +41,321 @@ __all__ = [
     "inject_theme",
     "render_company_card",
     "render_portfolio_overview",
+    "render_topbar",
     "status_color",
 ]
 
-# Semantic accent colors (shadcn tokens — matching the request):
-#   good  = emerald (ok)   warning = amber (warning)
-#   bad   = red (error)    demo    = zinc  (neutral)   other = blue (info)
+# ---------------------------------------------------------------------------
+# Status palette — red is the only saturated hue; green is directional only
+# ---------------------------------------------------------------------------
+
 _STATUS = {
-    "good": {"fg": "#34d399", "bg": "rgba(52,211,153,0.10)", "bd": "rgba(52,211,153,0.25)"},
-    "warning": {"fg": "#fbbf24", "bg": "rgba(251,191,36,0.10)", "bd": "rgba(251,191,36,0.25)"},
-    "bad": {"fg": "#f87171", "bg": "rgba(248,113,113,0.10)", "bd": "rgba(248,113,113,0.25)"},
-    "demo": {"fg": "#a1a1aa", "bg": "rgba(161,161,170,0.08)", "bd": "rgba(161,161,170,0.18)"},
+    "good": {"fg": "#29B32E", "bg": "rgba(41,179,46,0.10)", "bd": "rgba(41,179,46,0.22)"},
+    "warning": {"fg": "#B86E00", "bg": "rgba(184,110,0,0.10)", "bd": "rgba(184,110,0,0.24)"},
+    "bad": {"fg": "#DB0011", "bg": "rgba(219,0,17,0.08)", "bd": "rgba(219,0,17,0.22)"},
+    "demo": {"fg": "#9FA1A4", "bg": "rgba(159,161,164,0.08)", "bd": "rgba(159,161,164,0.18)"},
     "unavailable": {
-        "fg": "#71717a",
-        "bg": "rgba(113,113,122,0.06)",
-        "bd": "rgba(113,113,122,0.16)",
+        "fg": "#C4C6C8",
+        "bg": "rgba(196,198,200,0.06)",
+        "bd": "rgba(196,198,200,0.16)",
     },
 }
 
-# Indicator id -> topic icon (consistent visual cue per category) + tint.
+# Indicator id -> (icon fn, tint)
 _IND_ICON = {
-    "country": (ic_map_pin, "#60a5fa"),  # blue
-    "industry": (ic_factory, "#a78bfa"),  # violet
-    "volatility": (ic_trending, "#f472b6"),  # pink
-    "geopolitical": (ic_shield, "#fb923c"),  # orange
-    "general_demand": (ic_trending, "#34d399"),  # emerald
-    "regulation": (ic_scale, "#fbbf24"),  # amber
-    "supply_chain": (ic_boxes, "#22d3ee"),  # cyan
-    "profitability": (ic_bar_chart, "#a3e635"),  # lime
-    "macro_health": (ic_activity, "#f87171"),  # red
-    "news_sentiment": (ic_newspaper, "#c084fc"),  # purple
+    "country": (ic_map_pin, "#2563EB"),
+    "industry": (ic_factory, "#7C3AED"),
+    "volatility": (ic_trending, "#DB0011"),
+    "geopolitical": (ic_shield, "#EA580C"),
+    "general_demand": (ic_trending, "#29B32E"),
+    "regulation": (ic_scale, "#B86E00"),
+    "supply_chain": (ic_boxes, "#0891B2"),
+    "profitability": (ic_bar_chart, "#65A30D"),
+    "macro_health": (ic_activity, "#DB0011"),
+    "news_sentiment": (ic_newspaper, "#9333EA"),
+    "ism": (ic_activity, "#0EA5E9"),
 }
 
-
-def _display_sector(sector: str) -> str:
-    """Format a free-form sector string for display. Returns ``"—"`` for empty."""
-    if not sector:
-        return "—"
-    return sector.title()
-
+# ---------------------------------------------------------------------------
+# Theme CSS
+# ---------------------------------------------------------------------------
 
 _THEME_CSS = """
 <style>
-  /* hide the sidebar entirely */
-  [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] { display: none !important; }
+:root{
+  --brand-red:#DB0011; --brand-red-dark:#B4000E; --brand-red-tint:rgba(219,0,17,.08);
+  --success:#29B32E; --warn:#B86E00;
+  --ink-900:#1A1A1A; --ink-700:#333333; --ink-500:#9FA1A4; --ink-400:#BFC1C4;
+  --line-200:#E6E6E6; --line-soft:#F0F0F0; --tile-100:#F7F7F7;
+  --page-bg:#F5F5F5; --card-bg:#FFFFFF;
+  --radius-card:8px; --radius-pill:999px; --radius-input:6px; --radius-cc:12px;
+  --shadow-card:0 4px 12px rgba(0,0,0,0.03);
+  --shadow-hover:0 6px 16px rgba(0,0,0,0.05);
+}
 
-  .stApp { background: #09090b; }
-  .block-container { padding: 2.4rem 2rem 4rem !important; max-width: 1080px; }
+html, body, [class*="css"]{
+  font-family:Univers,"Univers Next","Helvetica Neue",Arial,sans-serif;
+  color:var(--ink-900);
+}
 
-  [data-testid="stMarkdownContainer"] { color: #e4e4e7; line-height: 1.55; }
-  [data-testid="stMetricValue"] { font-weight: 700 !important; color: #fafafa !important;
-                                   font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace; }
-  [data-testid="stMetricLabel"] { color: #71717a !important; font-size: 0.7rem !important;
-                                   text-transform: uppercase; letter-spacing: 0.08em; }
+/* Hide chrome */
+#MainMenu, footer, [data-testid="stToolbar"]{ visibility:hidden; }
+[data-testid="stHeader"]{ background:transparent; }
+[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"]{ display:none !important; }
+[data-testid="stAppViewContainer"]{ background:var(--page-bg); }
 
-  /* dark inputs */
-  .stTextInput > div > div > input, .stSelectbox div[data-baseweb="select"] > div {
-    background: #18181b !important;
-    border: 1px solid #27272a !important; border-radius: 8px !important;
-    color: #e4e4e7 !important;
-  }
-  .stTextInput > div > div > input::placeholder { color: #52525b !important; }
-  .stSelectbox svg { color: #71717a !important; }
-  .stSelectbox div[data-baseweb="select"] > div > div { color: #e4e4e7 !important; }
-  .stSelectbox div[data-baseweb="select"] > div:has(> div[class*="placeholder"]) > div { color: #52525b !important; }
+/* Centered single column — symmetric */
+[data-testid="stAppViewContainer"] .stAppViewBlock,
+[data-testid="stAppViewContainer"] .main .block-container{
+  padding:40px 24px 64px; max-width:1100px; margin:0 auto; float:none;
+}
 
-  hr { border-color: #1f1f23 !important; margin: 2rem 0 !important; }
+h1,h2,h3,h4,h5,h6{ color:var(--ink-900); font-weight:700; }
+[data-testid="stMarkdownContainer"]{ color:var(--ink-900); line-height:1.55; }
+.stCaption, [data-testid="stCaptionContainer"]{ color:var(--ink-500) !important; font-size:12px; }
+hr{ border:none; border-top:1px solid var(--line-200); margin:32px 0; }
 
-  /* streamlit expander restyle (for methodology) */
-  details[data-testid="stExpander"] {
-    border: 1px solid #27272a !important; border-radius: 12px !important;
-    background: #18181b !important; box-shadow: none !important;
-  }
+/* Inputs */
+.stTextInput label, .stTextInput > label{ display:none; }
+.stTextInput > div > div > input{
+  background:var(--card-bg) !important; border:1px solid var(--line-200) !important;
+  border-radius:var(--radius-input) !important; color:var(--ink-900) !important;
+  padding:10px 14px !important; font-size:14px !important; box-shadow:none !important;
+  font-family:inherit;
+}
+.stTextInput > div > div > input:focus{
+  border-color:var(--brand-red) !important; box-shadow:0 0 0 2px var(--brand-red-tint) !important;
+  outline:none !important;
+}
+.stTextInput > div > div > input::placeholder{ color:var(--ink-500) !important; }
 
-  /* company card — shadcn Card: a folded <details> (collapsed by default) */
-  details.rw-card {
-    background: #18181b;
-    border: 1px solid #27272a;
-    border-radius: 14px;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.25);
-    padding: 0;
-    margin-bottom: 1rem;
-    overflow: hidden;
-  }
-  details.rw-card > summary {
-    cursor: pointer; list-style: none; outline: none;
-    padding: 1.3rem 1.6rem;
-    display: flex; justify-content: space-between; align-items: center; gap: 1rem;
-  }
-  details.rw-card > summary::-webkit-details-marker { display: none; }
-  details.rw-card > summary:hover { background: rgba(255,255,255,0.02); }
-  details.rw-card[open] > summary { border-bottom: 1px solid #27272a; }
-  .rw-card-body { padding: 0.4rem 1.6rem 0.8rem; }
-  .rw-card-head {
-    display: flex; justify-content: space-between; align-items: center; gap: 1rem;
-  }
-  .rw-name { font-size: 1.1rem; font-weight: 600; color: #fafafa; letter-spacing: -0.01em; }
-  .rw-pill {
-    background: rgba(255,255,255,0.06); color: #d4d4d8; border: 1px solid #27272a;
-    border-radius: 999px; padding: 2px 10px; font-size: 0.62rem; font-weight: 500;
-    margin-left: 10px; letter-spacing: 0.02em;
-  }
-  .rw-ticker {
-    color: #71717a; font-size: 0.72rem; margin-left: 8px;
-    font-family: "JetBrains Mono", ui-monospace, monospace;
-  }
-  .rw-comp { text-align: right; white-space: nowrap; }
-  .rw-comp-num {
-    font-size: 2rem; font-weight: 700; line-height: 1;
-    font-family: "JetBrains Mono", ui-monospace, monospace;
-  }
-  .rw-comp-cap {
-    color: #52525b; font-size: 0.56rem; margin-top: 3px;
-    text-transform: uppercase; letter-spacing: 0.1em;
-  }
-  .rw-card-head-right { display: flex; align-items: center; gap: 0.8rem; }
-  .rw-card-chev { color: #52525b; transition: transform 0.15s ease; display: inline-flex; }
-  details.rw-card[open] > summary .rw-card-chev { transform: rotate(180deg); }
+/* Buttons */
+div[data-testid="stButton"] button{
+  background:var(--card-bg); color:var(--ink-900); border:1px solid var(--line-200);
+  border-radius:var(--radius-input); font-weight:600; padding:10px 20px; box-shadow:none;
+  transition:background .15s ease, border-color .15s ease, color .15s ease;
+  font-family:inherit; font-size:14px;
+}
+div[data-testid="stButton"] button:hover{ background:var(--line-soft); border-color:#D0D0D0; }
+div[data-testid="stButton"] button:focus{ outline:2px solid var(--brand-red); outline-offset:2px; }
+div[data-testid="stButton"] button[kind="primary"]{
+  background:var(--brand-red); color:#fff; border:1px solid var(--brand-red);
+}
+div[data-testid="stButton"] button[kind="primary"]:hover{ background:var(--brand-red-dark); }
+div[data-testid="stButton"] button:disabled{ opacity:.4; }
 
-  /* indicator list (vertical, one after another) */
-  .rw-rows { list-style: none; margin: 0; padding: 0; }
-  .rw-row { border-bottom: 1px solid #1f1f23; }
-  .rw-row:last-child { border-bottom: none; }
-  .rw-row > summary {
-    display: grid;
-    grid-template-columns: 1fr auto 130px 22px;
-    align-items: center; gap: 1rem;
-    padding: 0.85rem 0;
-    cursor: pointer; list-style: none; outline: none;
-  }
-  .rw-row > summary::-webkit-details-marker { display: none; }
-  .rw-row > summary:hover { background: rgba(255,255,255,0.02); }
-  .rw-row-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
-  .rw-icon { display: inline-flex; color: #71717a; }
-  .rw-topic-icon { display: inline-flex; }
-  .rw-label { color: #d4d4d8; font-size: 0.84rem; font-weight: 500;
-              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .rw-mid { display: flex; align-items: center; gap: 8px; }
-  .rw-val { color: #fafafa; font-size: 0.92rem; font-weight: 600;
-            font-family: "JetBrains Mono", ui-monospace, monospace; }
-  .rw-badge {
-    border-radius: 999px; padding: 1px 8px; font-size: 0.55rem; font-weight: 600;
-    letter-spacing: 0.04em; text-transform: uppercase;
-    display: inline-flex; align-items: center; gap: 3px;
-  }
-  .rw-right { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
-  .rw-bar { background: #27272a; border-radius: 999px; height: 4px; width: 70px; overflow: hidden; }
-  .rw-bar-fill { height: 4px; border-radius: 999px; }
-  .rw-num { color: #71717a; font-size: 0.72rem; font-weight: 600; min-width: 22px;
-            text-align: right; font-family: "JetBrains Mono", ui-monospace, monospace; }
-  .rw-chev { color: #52525b; transition: transform 0.15s ease; }
-  .rw-row[open] > summary .rw-chev { transform: rotate(180deg); }
-  .rw-row[open] > summary { padding-bottom: 0.4rem; }
+/* Alerts */
+[data-testid="stAlert"]{
+  background:var(--card-bg) !important; border:1px solid var(--line-200) !important;
+  border-radius:var(--radius-card) !important; box-shadow:none !important;
+  color:var(--ink-700) !important; padding:14px 18px !important;
+}
 
-  /* expanded detail panel */
-  .rw-detail {
-    padding: 0.7rem 0 1rem 32px;
-    color: #a1a1aa; font-size: 0.74rem;
-    border-top: 1px solid #1f1f23;
-    margin-top: 0.2rem;
-  }
-  .rw-desc {
-    color: #a1a1aa; font-size: 0.72rem; line-height: 1.5;
-    padding: 0.3rem 0 0.6rem;
-    border-bottom: 1px dashed rgba(255,255,255,0.05);
-    margin-bottom: 0.4rem;
-    max-width: 60ch;
-  }
-  .rw-detail-grid {
-    display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px;
-    margin: 0.4rem 0 0.5rem;
-  }
-  .rw-k { color: #52525b; text-transform: uppercase; letter-spacing: 0.06em;
-          font-size: 0.6rem; font-weight: 600; }
-  .rw-v { color: #e4e4e7; font-family: "JetBrains Mono", ui-monospace, monospace;
-         font-size: 0.74rem; }
-  .rw-note { display: flex; gap: 6px; color: #71717a; font-size: 0.7rem;
-             margin-top: 0.4rem; max-width: 70ch; }
-  .rw-src { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 0.5rem; }
-  .rw-src-chip {
-    display: inline-flex; align-items: center; gap: 4px;
-    background: rgba(255,255,255,0.04); border: 1px solid #27272a;
-    border-radius: 6px; padding: 2px 7px; font-size: 0.62rem;
-    color: #71717a; font-family: "JetBrains Mono", ui-monospace, monospace;
-  }
+/* Status widget */
+[data-testid="stStatusWidget"]{
+  background:var(--card-bg) !important; border:1px solid var(--line-200) !important;
+  border-left:3px solid var(--brand-red) !important;
+  border-radius:var(--radius-card) !important; box-shadow:var(--shadow-card) !important;
+}
 
-  /* toolbar */
-  .rw-toolbar { display: flex; align-items: flex-end; gap: 0.8rem; margin-bottom: 1.5rem; }
-  .rw-toolbar > div { flex: 1; }
-  .rw-toolbar > div:first-child { flex: 3; }
-  .rw-search-ic { position: relative; }
-</style>
-<style>
-  /* --- Portfolio overview panel --- */
-  .rw-ov {
-    background: #18181b;
-    border: 1px solid #27272a;
-    border-radius: 14px;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.25);
-    padding: 1.5rem 1.6rem 1.2rem;
-    margin-bottom: 0.5rem;
-  }
-  .rw-ov-top { display: grid; grid-template-columns: repeat(4,1fr); gap: 1rem; }
-  .rw-ov-tile { display: flex; gap: 0.8rem; align-items: flex-start; }
-  .rw-ov-label {
-    color: #71717a; font-size: 0.64rem; text-transform: uppercase;
-    letter-spacing: 0.08em; font-weight: 600;
-  }
-  .rw-ov-val {
-    font-size: 1.7rem; font-weight: 800; line-height: 1.1;
-    margin-top: 2px;
-    font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace;
-  }
-  .rw-ov-sub { color: #52525b; font-size: 0.62rem; margin-top: 1px; }
-  .rw-ov-ic { display: inline-flex; padding-top: 4px; }
+/* Progress bar */
+.stProgress > div > div > div > div{ background-color:var(--brand-red) !important; }
+.stProgress > div > div > div{ background-color:var(--line-200) !important; }
 
-  .rw-ov-divider { border: none; border-top: 1px solid #27272a; margin: 1.4rem 0 1.2rem !important; }
+/* Expanders */
+details[data-testid="stExpander"]{
+  background:var(--card-bg) !important; border:1px solid var(--line-200) !important;
+  border-radius:var(--radius-card) !important; box-shadow:var(--shadow-card) !important;
+  padding:0 !important; overflow:hidden;
+}
+details[data-testid="stExpander"] summary{ padding:18px 24px !important; font-weight:600 !important; color:var(--ink-900) !important; }
+details[data-testid="stExpander"] [data-testid="stExpanderDetails"]{ padding:0 24px 20px !important; }
 
-  .rw-ov-body { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
-  .rw-panel-title {
-    color: #71717a; font-size: 0.66rem; text-transform: uppercase;
-    letter-spacing: 0.08em; font-weight: 600; margin-bottom: 0.7rem;
-  }
+/* ---- Component classes ---- */
 
-  /* sector rows */
-  .rw-sectors { display: flex; flex-direction: column; gap: 0.55rem; }
-  .rw-sector-row { display: flex; align-items: center; gap: 10px; }
-  .rw-sector-name { color: #d4d4d8; font-size: 0.82rem; font-weight: 500;
-                    min-width: 120px; }
-  .rw-sector-meta { color: #71717a; font-size: 0.74rem;
-                    flex: 1; font-family: "JetBrains Mono", ui-monospace, monospace; }
-  .rw-sector-row .rw-dot { flex-shrink: 0; }
+/* Page header — centered */
+.pb-header{ text-align:center; margin:8px 0 36px; }
+.pb-header h1{ font-size:28px; font-weight:700; color:var(--ink-900); margin:0 0 6px; letter-spacing:-0.01em; }
+.pb-header p{ font-size:14px; color:var(--ink-500); margin:0; }
 
-  /* distribution bars */
-  .rw-dist { display: flex; flex-direction: column; gap: 0.4rem; }
-  .rw-dist-row { display: grid; grid-template-columns: 60px 1fr 24px;
-                 align-items: center; gap: 8px; }
-  .rw-dist-label { color: #a1a1aa; font-size: 0.7rem; font-weight: 500; }
-  .rw-dist-bar { background: #27272a; border-radius: 999px; height: 5px; overflow: hidden; }
-  .rw-dist-fill { height: 5px; border-radius: 999px; }
-  .rw-dist-num { color: #a1a1aa; font-size: 0.7rem; font-weight: 600; text-align: right;
-                 font-family: "JetBrains Mono", ui-monospace, monospace; }
+/* Card */
+.pb-card{
+  background:var(--card-bg); border-radius:var(--radius-card); box-shadow:var(--shadow-card);
+  padding:24px;
+}
+.pb-card-title{
+  font-size:16px; font-weight:600; color:var(--ink-900); margin:0 0 20px;
+  display:flex; align-items:center; gap:8px;
+}
+.pb-card-title::before{
+  content:""; width:4px; height:16px; background:var(--brand-red); border-radius:2px;
+}
+.pb-card-sub{ font-size:12px; color:var(--ink-500); margin-left:auto; }
 
-  /* top 3 */
-  .rw-top3 { display: flex; flex-direction: column; gap: 0.35rem; }
-  .rw-top3-row { display: grid; grid-template-columns: 18px 1fr 30px auto;
-                 align-items: center; gap: 8px; }
-  .rw-top3-num { color: #52525b; font-size: 0.68rem; font-weight: 600;
-                 font-family: "JetBrains Mono", ui-monospace, monospace; }
-  .rw-top3-name { color: #d4d4d8; font-size: 0.78rem; font-weight: 500; overflow: hidden;
-                  text-overflow: ellipsis; white-space: nowrap; }
-  .rw-top3-score { color: #f87171; font-size: 0.74rem; font-weight: 700; text-align: right;
-                   font-family: "JetBrains Mono", ui-monospace, monospace; }
-  .rw-top3-pil {
-    background: rgba(255,255,255,0.05); color: #a1a1aa; border: 1px solid #27272a;
-    border-radius: 999px; padding: 1px 7px; font-size: 0.55rem; font-weight: 500;
-  }
+/* KPI cards — centered text, stacked vertically */
+.pb-kpi{
+  background:var(--card-bg); border-radius:var(--radius-card); box-shadow:var(--shadow-card);
+  padding:28px 16px; text-align:center;
+  display:flex; flex-direction:column; align-items:center; gap:6px;
+}
+.pb-kpi-val{ font-size:28px; font-weight:700; color:var(--ink-900); line-height:1.1; letter-spacing:-0.02em; }
+.pb-kpi-lbl{ font-size:12px; font-weight:400; color:var(--ink-500); }
+.pb-kpi-trend{
+  display:inline-flex; align-items:center; gap:3px; font-size:12px; font-weight:600; margin-top:2px;
+}
 
-  /* worst indicator */
-  .rw-worst-row { display: flex; align-items: center; gap: 8px; }
-  .rw-worst-label { color: #d4d4d8; font-size: 0.78rem; font-weight: 500; }
-  .rw-worst-score { color: #71717a; font-size: 0.7rem;
-                    font-family: "JetBrains Mono", ui-monospace, monospace; }
+/* Chart card */
+.pb-chart-head{ margin-bottom:16px; }
+.pb-chart-title{ font-size:16px; font-weight:600; color:var(--ink-900); }
+.pb-chart-meta{ font-size:12px; color:var(--ink-500); margin-top:2px; }
+.pb-chart-big{ font-size:24px; font-weight:700; color:var(--ink-900); margin-top:8px; }
+.pb-chart-svg{ width:100%; display:block; }
 
-  /* chips */
-  .rw-chips { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 0.8rem; }
-  .rw-chip {
-    display: inline-flex; align-items: center; gap: 6px;
-    background: rgba(255,255,255,0.04); border: 1px solid #27272a;
-    border-radius: 999px; padding: 3px 10px; font-size: 0.68rem; color: #d4d4d8;
-  }
+/* Distribution bars */
+.pb-dist-row{ display:grid; grid-template-columns:72px 1fr 32px; align-items:center; gap:12px; margin-bottom:12px; }
+.pb-dist-lbl{ font-size:13px; font-weight:500; color:var(--ink-700); }
+.pb-dist-bar{ background:var(--line-soft); height:8px; border-radius:var(--radius-pill); overflow:hidden; }
+.pb-dist-fill{ height:8px; border-radius:var(--radius-pill); }
+.pb-dist-num{ font-size:13px; font-weight:700; color:var(--ink-900); text-align:right; }
 
-  /* panels gap */
-  .rw-ov-right { display: flex; flex-direction: column; gap: 1.1rem; }
+/* Sector rows */
+.pb-sec-row{ display:flex; align-items:center; gap:12px; padding:6px 0; }
+.pb-sec-name{ font-size:13px; font-weight:500; color:var(--ink-700); flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pb-sec-meta{ font-size:12px; color:var(--ink-500); }
+.pb-sec-bar{ width:50px; height:6px; border-radius:var(--radius-pill); background:var(--line-soft); overflow:hidden; flex-shrink:0; }
+.pb-sec-bar-fill{ height:6px; border-radius:var(--radius-pill); }
 
-  /* hide Streamlit's sticky header (top bar + toolbar) */
-  [data-testid="stHeader"] { display: none; }
-  #MainMenu { visibility: hidden; }
-  footer { visibility: hidden; }
-  [data-testid="stToolbar"] { display: none; }
+/* Transaction rows (top risk borrowers) */
+.pb-txn{ display:flex; align-items:center; gap:14px; padding:10px 4px; }
+.pb-txn:hover{ background:var(--line-soft); border-radius:6px; }
+.pb-txn-icon{
+  width:40px; height:40px; border-radius:6px; background:var(--tile-100);
+  display:flex; align-items:center; justify-content:center; flex-shrink:0;
+}
+.pb-txn-info{ flex:1; min-width:0; }
+.pb-txn-name{ font-size:14px; font-weight:600; color:var(--ink-900); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pb-txn-date{ font-size:12px; color:var(--ink-500); margin-top:1px; }
+.pb-txn-amt{ font-size:14px; font-weight:700; color:var(--ink-900); text-align:right; white-space:nowrap; }
+.pb-txn-amt-sub{ font-size:11px; color:var(--ink-500); font-weight:400; }
+
+/* Pills/badges */
+.pb-pill{
+  display:inline-flex; align-items:center; gap:4px;
+  border-radius:var(--radius-pill); padding:2px 10px;
+  font-size:11px; font-weight:600;
+}
+
+/* Stat chips */
+.pb-chips{ display:flex; gap:10px; flex-wrap:wrap; }
+.pb-chip{
+  display:inline-flex; align-items:center; gap:8px;
+  background:var(--card-bg); border:1px solid var(--line-200); border-radius:var(--radius-pill);
+  padding:6px 14px; font-size:13px; color:var(--ink-700); font-weight:500;
+}
+
+/* Company detail card */
+.pb-co-card{
+  background:var(--card-bg); border-radius:var(--radius-card); box-shadow:var(--shadow-card);
+  overflow:hidden; margin-bottom:16px;
+}
+.pb-co-head{ display:flex; align-items:center; gap:16px; padding:20px 24px; cursor:pointer; }
+.pb-co-head:hover{ background:var(--line-soft); }
+.pb-co-score{
+  width:48px; height:48px; border-radius:6px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:20px; font-weight:700; flex-shrink:0;
+}
+.pb-co-titles{ flex:1; min-width:0; }
+.pb-co-name{ font-size:16px; font-weight:600; color:var(--ink-900); }
+.pb-co-meta{ font-size:12px; color:var(--ink-500); margin-top:2px; display:flex; gap:8px; align-items:center; }
+.pb-co-ticker{ font-family:"JetBrains Mono",ui-monospace,monospace; font-size:12px; color:var(--ink-500); }
+.pb-co-comp{ text-align:right; }
+.pb-co-comp-num{ font-size:22px; font-weight:700; color:var(--ink-900); line-height:1; }
+.pb-co-comp-lbl{ font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-500); font-weight:600; margin-top:3px; }
+
+/* Indicator rows */
+.pb-rows{ padding:0 12px 16px; }
+.pb-row{
+  display:grid; grid-template-columns:1fr auto 110px 22px; align-items:center; gap:14px;
+  padding:12px; cursor:pointer;
+}
+.pb-row:hover{ background:var(--line-soft); border-radius:6px; }
+.pb-row-left{ display:flex; align-items:center; gap:12px; min-width:0; }
+.pb-row-tile{
+  width:36px; height:36px; border-radius:6px; background:var(--tile-100);
+  display:flex; align-items:center; justify-content:center; flex-shrink:0;
+}
+.pb-row-label{ font-size:14px; font-weight:500; color:var(--ink-900); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pb-row-val{ font-size:14px; font-weight:600; color:var(--ink-900); font-family:"JetBrains Mono",ui-monospace,monospace; }
+.pb-row-badge{
+  display:inline-flex; align-items:center; gap:3px; border-radius:var(--radius-pill);
+  padding:2px 8px; font-size:11px; font-weight:600; margin-left:6px;
+}
+.pb-row-right{ display:flex; align-items:center; gap:10px; justify-content:flex-end; }
+.pb-row-bar{ background:var(--line-200); height:5px; width:70px; border-radius:var(--radius-pill); overflow:hidden; }
+.pb-row-bar-fill{ height:5px; border-radius:var(--radius-pill); }
+.pb-row-num{ font-size:12px; font-weight:700; color:var(--ink-500); min-width:22px; text-align:right; font-family:"JetBrains Mono",ui-monospace,monospace; }
+.pb-row-chev{ color:var(--ink-400); transition:transform .15s ease; display:inline-flex; }
+details.pb-row[open] > summary .pb-row-chev{ transform:rotate(180deg); }
+
+.pb-row-detail{ padding:8px 12px 14px 60px; }
+.pb-row-desc{ font-size:13px; color:var(--ink-500); line-height:1.55; max-width:60ch; margin:8px 0 12px; }
+.pb-row-detail-grid{
+  display:grid; grid-template-columns:max-content 1fr; gap:4px 16px;
+  background:var(--tile-100); border-radius:6px; padding:12px; margin-bottom:12px;
+}
+.pb-row-k{ font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-500); }
+.pb-row-v{ font-size:12px; color:var(--ink-700); font-family:"JetBrains Mono",ui-monospace,monospace; }
+.pb-row-note{ display:flex; gap:6px; font-size:12px; color:var(--ink-500); margin-bottom:10px; max-width:70ch; }
+.pb-row-src{ display:flex; gap:6px; flex-wrap:wrap; }
+.pb-row-src-chip{
+  display:inline-flex; align-items:center; gap:4px; background:var(--tile-100);
+  border:1px solid var(--line-200); border-radius:4px; padding:3px 8px;
+  font-size:11px; color:var(--ink-500); font-family:"JetBrains Mono",ui-monospace,monospace;
+}
+
+/* Credit card visual */
+.pb-cc{
+  background:var(--brand-red); border-radius:var(--radius-cc); padding:24px; color:#fff;
+  display:flex; flex-direction:column; gap:16px; min-height:180px; position:relative; overflow:hidden;
+}
+.pb-cc::before{
+  content:""; position:absolute; top:-20px; right:-20px; width:160px; height:160px;
+  border-radius:50%; background:rgba(255,255,255,0.06);
+}
+.pb-cc::after{
+  content:""; position:absolute; bottom:-60px; left:-30px; width:200px; height:200px;
+  border-radius:50%; background:rgba(255,255,255,0.04);
+}
+.pb-cc > *{ position:relative; z-index:1; }
+.pb-cc-top{ display:flex; justify-content:space-between; align-items:center; }
+.pb-cc-mark{ font-size:10px; font-weight:800; letter-spacing:0.16em; }
+.pb-cc-chip{ width:28px; height:22px; border-radius:4px; background:rgba(255,255,255,0.25); }
+.pb-cc-num{ font-size:17px; font-weight:600; letter-spacing:2px; }
+.pb-cc-row{ display:flex; justify-content:space-between; align-items:baseline; font-size:12px; }
+.pb-cc-row .lbl{ font-size:9px; letter-spacing:0.1em; opacity:0.7; margin-bottom:3px; }
+.pb-cc-row .val{ font-size:13px; font-weight:600; }
+.pb-cc-btn{
+  background:#fff; color:var(--brand-red); border:none; border-radius:6px;
+  padding:10px; font-size:14px; font-weight:600; cursor:pointer; width:100%; text-align:center;
+}
+.pb-cc-btn:hover{ background:#FDF0F1; }
+
+/* Add-company toolbar */
+.pb-toolbar{ display:flex; gap:10px; margin-bottom:24px; }
+
+@media (prefers-reduced-motion: reduce){ *{ transition:none !important; animation:none !important; } }
 </style>
 """
 
 
 def inject_theme() -> None:
-    """Inject dark dashboard CSS (shadcn tokens) once per page render."""
     st.markdown(_THEME_CSS, unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
 def status_color(status: str) -> str:
@@ -333,21 +366,473 @@ def _token(status: str) -> dict[str, str]:
     return _STATUS.get(status, _STATUS["unavailable"])
 
 
-def _field(value: object) -> str:
-    if isinstance(value, float):
-        return f"{value:.3f}".rstrip("0").rstrip(".")
-    return str(value).replace("<", "&lt;").replace(">", "&gt;")
+def _esc(value: object) -> str:
+    s = f"{value:.3f}".rstrip("0").rstrip(".") if isinstance(value, float) else str(value)
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _badge(text: str, kind: str = "demo") -> str:
-    if kind == "key":
-        fg, bg, bd = "#fbbf24", "rgba(251,191,36,0.10)", "rgba(251,191,36,0.30)"
-    else:  # demo / none
-        fg, bg, bd = "#a1a1aa", "rgba(161,161,170,0.08)", "rgba(161,161,170,0.18)"
+def _display_sector(sector: str) -> str:
+    return (sector or "\u2014").replace("_", " ").title()
+
+
+def _status_badge(status: str) -> str:
+    tok = _token(status)
     return (
-        f'<span class="rw-badge" style="background:{bg};color:{fg};border:1px solid {bd};'
-        f'">{_field(text)}</span>'
+        f'<span class="pb-row-badge" '
+        f'style="background:{tok["bg"]};color:{tok["fg"]};border:1px solid {tok["bd"]}">'
+        f"{_esc(status)}</span>"
     )
+
+
+def _composite_status(score: float) -> str:
+    if score < 35:
+        return "good"
+    if score < 65:
+        return "warning"
+    return "bad"
+
+
+# ---------------------------------------------------------------------------
+# SVG spline chart — smooth red line with gradient area fill
+# ---------------------------------------------------------------------------
+
+
+def _spline_chart_svg(
+    labels: list[str],
+    values: list[float],
+    width: int = 720,
+    height: int = 260,
+    line_color: str = "#DB0011",
+) -> str:
+    """A smooth spline area chart: 2px red line, gradient fill, dashed
+    horizontal gridlines, uppercase x-axis labels. No vertical gridlines."""
+    if not values:
+        return ""
+    n = len(values)
+    pad_l, pad_r, pad_t, pad_b = 40, 16, 16, 30
+    plot_w = width - pad_l - pad_r
+    plot_h = height - pad_t - pad_b
+    vmin, vmax = min(values), max(values)
+    if vmax == vmin:
+        vmax = vmin + 1.0
+    span = vmax - vmin
+
+    def x(i: int) -> float:
+        return pad_l + (i / max(1, n - 1)) * plot_w
+
+    def y(v: float) -> float:
+        return pad_t + plot_h - ((v - vmin) / span) * plot_h
+
+    points = [(x(i), y(v)) for i, v in enumerate(values)]
+
+    # Catmull-Rom -> cubic Bezier for smooth spline
+    bezier = ""
+    for i in range(n - 1):
+        p0 = points[max(0, i - 1)]
+        p1 = points[i]
+        p2 = points[i + 1]
+        p3 = points[min(n - 1, i + 2)]
+        cp1x = p1[0] + (p2[0] - p0[0]) / 6
+        cp1y = p1[1] + (p2[1] - p0[1]) / 6
+        cp2x = p2[0] - (p3[0] - p1[0]) / 6
+        cp2y = p2[1] - (p3[1] - p1[1]) / 6
+        if i == 0:
+            bezier += f"M{p1[0]:.1f},{p1[1]:.1f} "
+        bezier += f"C{cp1x:.1f},{cp1y:.1f} {cp2x:.1f},{cp2y:.1f} {p2[0]:.1f},{p2[1]:.1f} "
+
+    # Area path
+    area_path = (
+        bezier + f"L{x(n - 1):.1f},{(pad_t + plot_h):.1f} L{x(0):.1f},{(pad_t + plot_h):.1f} Z"
+    )
+
+    # Gridlines
+    def grid(f: float) -> str:
+        gv = vmin + span * f
+        gy = y(gv)
+        return (
+            f'<line x1="{pad_l}" y1="{gy:.1f}" x2="{width - pad_r}" y2="{gy:.1f}" '
+            f'stroke="#E6E6E6" stroke-width="1" stroke-dasharray="3 4"/>'
+        )
+
+    grids = "".join(grid(f) for f in (0.0, 0.25, 0.5, 0.75, 1.0))
+
+    # X-axis labels
+    xlabs = "".join(
+        f'<text x="{x(i):.1f}" y="{height - 8}" text-anchor="middle" '
+        f'fill="#9FA1A4" font-family="Univers,Helvetica,Arial,sans-serif" '
+        f'font-size="10" font-weight="600" letter-spacing="0.6">{_esc(lbl)}</text>'
+        for i, lbl in enumerate(labels)
+    )
+
+    gid = "pbGrad"
+
+    return (
+        f'<svg class="pb-chart-svg" viewBox="0 0 {width} {height}" '
+        f'preserveAspectRatio="xMidYMid meet" role="img" aria-label="chart">'
+        f'<defs><linearGradient id="{gid}" x1="0" y1="0" x2="0" y2="1">'
+        f'<stop offset="0%" stop-color="{line_color}" stop-opacity="0.18"/>'
+        f'<stop offset="100%" stop-color="{line_color}" stop-opacity="0.0"/>'
+        f"</linearGradient></defs>"
+        f"{grids}"
+        f'<path d="{area_path}" fill="url(#{gid})"/>'
+        f'<path d="{bezier}" fill="none" stroke="{line_color}" stroke-width="2" '
+        f'stroke-linecap="round" stroke-linejoin="round"/>'
+        f"{xlabs}"
+        f"</svg>"
+    )
+
+
+def _bar_chart_svg(
+    labels: list[str],
+    values: list[float],
+    colors: list[str] | None = None,
+    width: int = 720,
+    height: int = 260,
+    bar_color: str = "#DB0011",
+) -> str:
+    """Simple rounded-bar chart with dashed gridlines."""
+    if not values:
+        return ""
+    n = len(values)
+    pad_l, pad_r, pad_t, pad_b = 16, 16, 12, 28
+    plot_w = width - pad_l - pad_r
+    plot_h = height - pad_t - pad_b
+    vmax = max(values) * 1.15 if max(values) > 0 else 1.0
+    gap = plot_w / n
+    bar_w = max(10, gap * 0.5)
+
+    def grid(y_val: float) -> str:
+        gy = pad_t + plot_h - (y_val / vmax) * plot_h
+        return (
+            f'<line x1="{pad_l}" y1="{gy:.1f}" x2="{width - pad_r}" y2="{gy:.1f}" '
+            f'stroke="#E6E6E6" stroke-width="1" stroke-dasharray="3 4"/>'
+        )
+
+    grids = "".join(grid(v) for v in [vmax * f for f in (0.25, 0.5, 0.75, 1.0)])
+
+    def bar(i: int, v: float) -> str:
+        h = (v / vmax) * plot_h
+        bx = pad_l + i * gap + (gap - bar_w) / 2
+        by = pad_t + plot_h - h
+        fill = colors[i] if colors and i < len(colors) else bar_color
+        return f'<rect x="{bx:.1f}" y="{by:.1f}" width="{bar_w:.1f}" height="{h:.1f}" rx="4" ry="4" fill="{fill}"/>'
+
+    bars = "".join(bar(i, v) for i, v in enumerate(values))
+
+    xlabs = "".join(
+        f'<text x="{pad_l + i * gap + gap / 2:.1f}" y="{height - 8}" text-anchor="middle" '
+        f'fill="#9FA1A4" font-family="Univers,Helvetica,Arial,sans-serif" '
+        f'font-size="10" font-weight="600" letter-spacing="0.6">{_esc(lbl)}</text>'
+        for i, lbl in enumerate(labels)
+    )
+
+    return (
+        f'<svg class="pb-chart-svg" viewBox="0 0 {width} {height}" '
+        f'preserveAspectRatio="xMidYMid meet" role="img" aria-label="bar chart">'
+        f"{grids}{bars}{xlabs}</svg>"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Page header
+# ---------------------------------------------------------------------------
+
+
+def render_topbar(n_companies: int, n_sources: int = 0) -> None:
+    """Centered page header: title + subtitle. No breadcrumb, no sidebar."""
+    _ = (n_companies, n_sources)
+    st.markdown(
+        '<div class="pb-header"><h1>Portfolio Risk Dashboard</h1>'
+        "<p>Cross-region wholesale credit early-warning signals</p></div>",
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# KPI card
+# ---------------------------------------------------------------------------
+
+
+def _kpi_html(value: str, label: str, trend: str, *, positive: bool | None) -> str:
+    """One KPI card: value centered, label below, trend with arrow."""
+    if positive is None:
+        trend_html = f'<span class="pb-kpi-trend" style="color:var(--ink-500)">{trend}</span>'
+    else:
+        color = "var(--success)" if positive else "var(--brand-red)"
+        glyph = "\u2197" if positive else "\u2198"
+        trend_html = f'<span class="pb-kpi-trend" style="color:{color}">{glyph} {trend}</span>'
+    return f"""
+    <div class="pb-kpi">
+      <div class="pb-kpi-val">{value}</div>
+      <div class="pb-kpi-lbl">{label}</div>
+      {trend_html}
+    </div>
+    """
+
+
+# ---------------------------------------------------------------------------
+# Top risk borrowers — transaction-style rows
+# ---------------------------------------------------------------------------
+
+
+def _txn_html(rank: int, name: str, score: float, sector: str, status: str) -> str:
+    tok = _token(status)
+    fg = tok["fg"]
+    # incoming (good) = green up-right arrow; outgoing (bad) = red down arrow
+    positive = status == "good"
+    glyph = "\u2197" if positive else "\u2198"
+    sector_pretty = _display_sector(sector)
+    return f"""
+    <div class="pb-txn">
+      <div class="pb-txn-icon" style="color:{fg}">{glyph}</div>
+      <div class="pb-txn-info">
+        <div class="pb-txn-name">{rank}. {_esc(name)}</div>
+        <div class="pb-txn-date">{sector_pretty} \u00b7 composite risk</div>
+      </div>
+      <div style="text-align:right;">
+        <div class="pb-txn-amt" style="color:{fg}">{score:.0f}</div>
+        <div class="pb-txn-amt-sub">{status}</div>
+      </div>
+    </div>
+    """
+
+
+# ---------------------------------------------------------------------------
+# Sector + distribution helpers
+# ---------------------------------------------------------------------------
+
+
+def _sector_html(sec: SectorStat) -> str:
+    status = _composite_status(sec.mean_risk)
+    color = status_color(status)
+    return (
+        '<div class="pb-sec-row">'
+        f'<span class="pb-sec-name">{_display_sector(sec.sector)}</span>'
+        f'<span class="pb-sec-meta">{sec.count} \u00b7 {sec.share_pct:.0f}%</span>'
+        f'<span class="pb-sec-bar"><span class="pb-sec-bar-fill" style="width:{sec.mean_risk:.0f}%;background:{color}"></span></span>'
+        "</div>"
+    )
+
+
+def _distribution_html(stats: PortfolioStats) -> str:
+    def row(label: str, count: int, color: str) -> str:
+        pct = (count / stats.n_companies * 100) if stats.n_companies else 0
+        return (
+            f'<div class="pb-dist-row"><span class="pb-dist-lbl">{label}</span>'
+            f'<div class="pb-dist-bar"><div class="pb-dist-fill" style="width:{pct:.0f}%;background:{color}"></div></div>'
+            f'<span class="pb-dist-num">{count}</span></div>'
+        )
+
+    return (
+        "<div>"
+        + row("Good", stats.n_good, status_color("good"))
+        + row("Warning", stats.n_warning, status_color("warning"))
+        + row("Bad", stats.n_bad, status_color("bad"))
+        + "</div>"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Credit card visual (solid red, centered, "Activate" button)
+# ---------------------------------------------------------------------------
+
+
+def _credit_card_html(stats: PortfolioStats) -> str:
+    worst = stats.worst_indicator_label or "\u2014"
+    return f"""
+    <div class="pb-cc">
+      <div class="pb-cc-top">
+        <div class="pb-cc-mark">PREMIER BANK</div>
+        <div class="pb-cc-chip"></div>
+      </div>
+      <div class="pb-cc-num">\u2022\u2022\u2022\u2022 \u2022\u2022\u2022\u2022 \u2022\u2022\u2022\u2022 {stats.n_companies:04d}</div>
+      <div class="pb-cc-row">
+        <div><div class="lbl">WORST INDICATOR</div><div class="val">{_esc(worst)}</div></div>
+        <div style="text-align:right;"><div class="lbl">EXPOSURE</div><div class="val">{stats.n_bad}.{stats.n_warning:02d}</div></div>
+      </div>
+      <div class="pb-cc-btn">Activate card</div>
+    </div>
+    """
+
+
+# ---------------------------------------------------------------------------
+# Portfolio overview — centered symmetric layout
+# ---------------------------------------------------------------------------
+
+
+def render_portfolio_overview(stats: PortfolioStats) -> None:
+    """Centered symmetric overview:
+
+    1. KPI strip (4 cards, centered text)
+    2. Chart card (spline line + bar, side by side)
+    3. Risk breakdown + sector exposure (side by side)
+    4. Top risk borrowers list (full width)
+    5. Credit card visual (centered)
+    """
+    mean_status = _composite_status(stats.mean_risk)
+    mean_color = status_color(mean_status)
+
+    # -- KPI strip: 4 centered cards --
+    kpi_htmls = [
+        _kpi_html(
+            f"{stats.mean_risk:.0f}",
+            "Portfolio mean risk",
+            f"{100 - stats.mean_risk:.1f}%",
+            positive=stats.mean_risk < 50,
+        ),
+        _kpi_html(
+            f"{stats.hhi:.0f}",
+            "Sector concentration",
+            stats.hhi_label,
+            positive=stats.hhi_label == "low",
+        ),
+        _kpi_html(
+            f"{stats.country_concentration_pct:.0f}%",
+            "Country concentration",
+            f"{stats.n_distinct_countries} countries",
+            positive=stats.country_concentration_pct < 50,
+        ),
+        _kpi_html(
+            f"{stats.data_coverage_pct:.0f}%",
+            "Data coverage",
+            f"{stats.n_companies} borrowers",
+            positive=stats.data_coverage_pct >= 50,
+        ),
+    ]
+    kpi_cols = st.columns(4, gap="medium")
+    for col, html in zip(kpi_cols, kpi_htmls, strict=False):
+        with col:
+            st.markdown(html, unsafe_allow_html=True)
+
+    st.write("")
+
+    # -- Chart card: spline trend (mean risk over "sectors" as proxy timeline) --
+    # Build a smooth spline from the sector mean-risk readings.
+    spline_values = [s.mean_risk for s in stats.sectors[:8]] or [stats.mean_risk]
+    spline_labels = [_display_sector(s.sector).split(" ")[0][:10] for s in stats.sectors[:8]] or [
+        "Current"
+    ]
+    spline_svg = _spline_chart_svg(spline_labels, spline_values)
+
+    # Bar chart: sector mean risk bars colored by status
+    bar_labels = spline_labels
+    bar_values = spline_values
+    bar_colors = [status_color(_composite_status(v)) for v in bar_values]
+    bar_svg = _bar_chart_svg(bar_labels, bar_values, bar_colors)
+
+    # Split: spline left, bar right — symmetric
+    chart_cols = st.columns([1, 1], gap="medium")
+    with chart_cols[0]:
+        st.markdown(
+            f"""
+            <div class="pb-card">
+              <div class="pb-chart-head">
+                <div class="pb-chart-title">Risk trend</div>
+                <div class="pb-chart-meta">mean risk across sectors</div>
+                <div class="pb-chart-big" style="color:{mean_color}">{stats.mean_risk:.0f}<span style="font-size:14px;color:var(--ink-500);font-weight:400">/100</span></div>
+              </div>
+              {spline_svg}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with chart_cols[1]:
+        st.markdown(
+            f"""
+            <div class="pb-card">
+              <div class="pb-chart-head">
+                <div class="pb-chart-title">Sector risk</div>
+                <div class="pb-chart-meta">mean risk by sector</div>
+                <div class="pb-chart-big">{stats.n_companies}<span style="font-size:14px;color:var(--ink-500);font-weight:400"> borrowers</span></div>
+              </div>
+              {bar_svg}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.write("")
+
+    # -- Risk breakdown + sector exposure, side by side --
+    sec_rows = "".join(_sector_html(s) for s in stats.sectors) or (
+        '<div style="color:var(--ink-500);font-size:13px;">n/a</div>'
+    )
+    breakdown_cols = st.columns([1, 1], gap="medium")
+    with breakdown_cols[0]:
+        st.markdown(
+            f"""
+            <div class="pb-card">
+              <div class="pb-card-title">Risk distribution</div>
+              {_distribution_html(stats)}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with breakdown_cols[1]:
+        st.markdown(
+            f"""
+            <div class="pb-card">
+              <div class="pb-card-title">Sector exposure</div>
+              {sec_rows}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.write("")
+
+    # -- Top risk borrowers (transactions list) + credit card, side by side --
+    top_rows = (
+        "".join(
+            _txn_html(i + 1, name, score, sector, _composite_status(score))
+            for i, (name, score, sector) in enumerate(stats.top_risk)
+        )
+        or '<div style="color:var(--ink-500);font-size:13px;padding:8px;">No borrowers yet.</div>'
+    )
+
+    bottom_cols = st.columns([2, 1], gap="medium")
+    with bottom_cols[0]:
+        st.markdown(
+            f"""
+            <div class="pb-card">
+              <div class="pb-card-title">Top risk borrowers<span class="pb-card-sub">highest first</span></div>
+              {top_rows}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with bottom_cols[1]:
+        st.markdown(_credit_card_html(stats), unsafe_allow_html=True)
+
+    # -- Stat chips (centered, full width) --
+    chips_parts: list[str] = []
+    chips_parts.append(
+        f'<div class="pb-chip"><span style="color:var(--brand-red)">{ic_shield(14)}</span>'
+        f"<span><b>{stats.total_sanctions_flags}</b> sanctions flags</span></div>"
+    )
+    if stats.mean_sentiment is not None:
+        sent_color = "var(--success)" if stats.mean_sentiment > 0 else "var(--brand-red)"
+        chips_parts.append(
+            f'<div class="pb-chip"><span style="color:{sent_color}">{ic_newspaper(14)}</span>'
+            f"<span>bias <b>{stats.mean_sentiment:+.1f}</b></span></div>"
+        )
+    if stats.worst_indicator_id:
+        chips_parts.append(
+            f'<div class="pb-chip"><span style="color:var(--warn)">{ic_alert(14)}</span>'
+            f"<span>worst: <b>{_esc(stats.worst_indicator_label)}</b> ({stats.worst_indicator_mean:.0f})</span></div>"
+        )
+    st.write("")
+    st.markdown(
+        '<div style="text-align:center;"><div class="pb-chips">'
+        + "".join(chips_parts)
+        + "</div></div>",
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Company detail card
+# ---------------------------------------------------------------------------
 
 
 def _row_html(
@@ -359,66 +844,71 @@ def _row_html(
     tok = _token(result.status)
     fg = tok["fg"]
     status_ic = STATUS_ICON.get(result.status, ic_minus)(14)
-    status_icon = f'<span class="rw-icon" style="color:{fg};display:inline-flex">{status_ic}</span>'
-    topic_ic_fn, tint = _IND_ICON.get(indicator_id, (ic_gauge, "#71717a"))
-    topic_ic = topic_ic_fn(15)
-    topic_icon = f'<span class="rw-topic-icon" style="color:{tint}">{topic_ic}</span>'
+    topic_ic_fn, tint = _IND_ICON.get(indicator_id, (ic_gauge, "#9FA1A4"))
+    topic_ic = topic_ic_fn(16)
 
-    mid_extras = ""
+    badges = _status_badge(result.status)
     if result.status == "demo":
-        mid_extras += _badge("demo")
+        badges += (
+            '<span class="pb-row-badge" '
+            'style="background:rgba(159,161,164,.08);color:#9FA1A4;border:1px solid rgba(159,161,164,.18);">demo</span>'
+        )
     if result.missing_env:
-        mid_extras += _badge("key", "key")
-    mid = (
-        f'<span class="rw-mid"><span class="rw-val">{_field(result.value)}</span>'
-        f"{mid_extras}</span>"
-    )
+        badges += (
+            '<span class="pb-row-badge" '
+            'style="background:rgba(184,110,0,.08);color:#B86E00;border:1px solid rgba(184,110,0,.22);">key</span>'
+        )
+
+    mid = f'<span><span class="pb-row-val">{_esc(result.value)}</span>{badges}</span>'
 
     if result.status == "unavailable":
         bar = ""
         num = ""
     else:
         bar = (
-            f'<span class="rw-bar"><span class="rw-bar-fill" '
+            f'<span class="pb-row-bar"><span class="pb-row-bar-fill" '
             f'style="width:{result.score:.0f}%;background:{fg}"></span></span>'
         )
-        num = f'<span class="rw-num">{result.score:.0f}</span>'
+        num = f'<span class="pb-row-num">{result.score:.0f}</span>'
 
-    # detail panel (expanded)
-    desc_html = f'<div class="rw-desc">{description}</div>' if description else ""
+    desc_html = f'<div class="pb-row-desc">{_esc(description)}</div>' if description else ""
     detail_rows = ""
     if result.detail:
         items = sorted(result.detail.items())
-        detail_rows = "".join(
-            f'<span class="rw-k">{_field(k)}</span><span class="rw-v">{_field(v)}</span>'
+        rows = "".join(
+            f'<span class="pb-row-k">{_esc(k)}</span><span class="pb-row-v">{_esc(v)}</span>'
             for k, v in items
         )
-        detail_rows = f'<div class="rw-detail-grid">{detail_rows}</div>'
+        detail_rows = f'<div class="pb-row-detail-grid">{rows}</div>'
     note_html = ""
     if result.note:
-        note_html = (
-            f'<div class="rw-note"><span class="rw-icon">{ic_info(13)}</span>'
-            f"<span>{_field(result.note)}</span></div>"
-        )
+        note_html = f'<div class="pb-row-note">{ic_info(13)}<span>{_esc(result.note)}</span></div>'
     src_html = ""
     if result.source_ids:
         chips = " ".join(
-            f'<span class="rw-src-chip">{ic_file_text(12)}{s}</span>' for s in result.source_ids
+            f'<span class="pb-row-src-chip">{ic_file_text(12)}{_esc(s)}</span>'
+            for s in result.source_ids
         )
-        src_html = f'<div class="rw-src">{chips}</div>'
+        src_html = f'<div class="pb-row-src">{chips}</div>'
     detail_body = desc_html + detail_rows + note_html + src_html
     if not detail_body:
-        detail_body = '<div class="rw-note">no detail</div>'
+        detail_body = '<div class="pb-row-note">no detail</div>'
 
     return (
-        f'<details class="rw-row"><summary>'
-        f'<span class="rw-row-left">{topic_icon}<span class="rw-label">{label}</span></span>'
+        f'<details class="pb-row"><summary>'
+        f'<span class="pb-row-left">'
+        f'<span class="pb-row-tile" style="color:{tint}">{topic_ic}</span>'
+        f'<span class="pb-row-label">{_esc(label)}</span>'
+        f"</span>"
         f"{mid}"
-        f'<span class="rw-right">{status_icon}{bar}{num}'
-        f'<span class="rw-chev">{ic_chevron_down(16)}</span></span>'
-        f"</summary>"
-        f'<div class="rw-detail">{detail_body}</div>'
-        f"</details>"
+        f'<span class="pb-row-right">'
+        f'<span style="color:{fg}">{status_ic}</span>'
+        f"{bar}{num}"
+        f'<span class="pb-row-chev">{ic_chevron_down(16)}</span>'
+        "</span>"
+        "</summary>"
+        f'<div class="pb-row-detail">{detail_body}</div>'
+        "</details>"
     )
 
 
@@ -431,214 +921,44 @@ def render_company_card(
     rows: Iterable[tuple[str, str, str, SignalResult]],
     sources: Iterable[str],
 ) -> None:
-    """Render one company card (collapsible, collapsed by default).
-
-    ``rows`` yields ``(indicator_id, label, description, result)`` tuples.
-    Uses a native ``<details>`` mirroring the shadcn Collapsible pattern.
-    """
+    """One collapsible borrower card: header with score tile, body with
+    expandable indicator rows (data-table pattern)."""
     tok = _token(status)
     fg = tok["fg"]
     sector_pretty = _display_sector(sector)
-    body_rows = "".join(_row_html(iid, label, desc, result) for iid, label, desc, result in rows)
+    body_rows = "".join(_row_html(iid, lbl, desc, result) for iid, lbl, desc, result in rows)
     srcs = [s for s in sources if s]
     src_html = ""
     if srcs:
-        chips = " ".join(f'<span class="rw-src-chip">{ic_file_text(12)}{s}</span>' for s in srcs)
+        chips = " ".join(
+            f'<span class="pb-row-src-chip">{ic_file_text(12)}{_esc(s)}</span>' for s in srcs
+        )
         src_html = (
-            '<div style="padding:0.7rem 0 0.3rem;border-top:1px solid #1f1f23;'
-            f'color:#52525b;font-size:0.62rem;">{chips}</div>'
+            '<div style="padding:14px 24px 18px;border-top:1px solid var(--line-200);">'
+            '<div style="font-size:12px;color:var(--ink-500);font-weight:600;margin-bottom:8px;">Sources</div>'
+            f'<div class="pb-row-src">{chips}</div></div>'
         )
-    html = f"""
-    <details class="rw-card">
-      <summary>
-        <div class="rw-card-head" style="flex:1;">
-          <div>
-            <span class="rw-name">{name}</span>
-            <span class="rw-pill">{sector_pretty}</span>
-            <span class="rw-ticker">{ticker}</span>
-          </div>
-          <div class="rw-card-head-right">
-            <div class="rw-comp">
-              <div class="rw-comp-num" style="color:{fg}">{composite:.0f}</div>
-              <div class="rw-comp-cap">composite risk</div>
-            </div>
-            <span class="rw-card-chev">{ic_chevron_down(18)}</span>
-          </div>
-        </div>
-      </summary>
-      <div class="rw-card-body">
-        <ul class="rw-rows">{body_rows}</ul>
-        {src_html}
-      </div>
-    </details>
-    """
-    st.markdown(html, unsafe_allow_html=True)
-
-
-def _ov_tile_html(icon: str, label: str, value: str, sub: str, color: str = "#fafafa") -> str:
-    return f"""
-    <div class="rw-ov-tile">
-      <div class="rw-ov-ic" style="color:{color}">{icon}</div>
-      <div>
-        <div class="rw-ov-label">{label}</div>
-        <div class="rw-ov-val" style="color:{color}">{value}</div>
-        <div class="rw-ov-sub">{sub}</div>
-      </div>
-    </div>
-    """
-
-
-def _distribution_html(n_good: int, n_warn: int, n_bad: int, n_total: int) -> str:
-    def bar(label: str, count: int, color: str) -> str:
-        pct = count / n_total * 100 if n_total else 0
-        return (
-            f'<div class="rw-dist-row"><span class="rw-dist-label">{label}</span>'
-            f'<div class="rw-dist-bar"><div class="rw-dist-fill" '
-            f'style="width:{pct:.0f}%;background:{color}"></div></div>'
-            f'<span class="rw-dist-num">{count}</span></div>'
-        )
-
-    return (
-        '<div class="rw-dist">'
-        + bar("Good", n_good, "#34d399")
-        + bar("Warning", n_warn, "#fbbf24")
-        + bar("Bad", n_bad, "#f87171")
-        + "</div>"
-    )
-
-
-def _sector_html(sec: SectorStat) -> str:
-    status = "good" if sec.mean_risk < 35 else "warning" if sec.mean_risk < 65 else "bad"
-    color = status_color(status)
-    icon = ic_factory(15)
-    name = _display_sector(sec.sector)
-    return (
-        '<div class="rw-sector-row">'
-        f'<span class="rw-icon" style="color:{color}">{icon}</span>'
-        f'<span class="rw-sector-name">{name}</span>'
-        f'<span class="rw-sector-meta">{sec.count} · {sec.share_pct:.0f}% · mean {sec.mean_risk:.0f}</span>'
-        f'<span class="rw-dot" style="background:{color}"></span>'
-        "</div>"
-    )
-
-
-def _top3_html(top: list[tuple[str, float, str]]) -> str:
-    if not top:
-        return '<div class="rw-note">n/a</div>'
-    rows = ""
-    for i, (name, score, sector) in enumerate(top, 1):
-        rows += (
-            f'<div class="rw-top3-row"><span class="rw-top3-num">{i}</span>'
-            f'<span class="rw-top3-name">{name}</span>'
-            f'<span class="rw-top3-score">{score:.0f}</span>'
-            f'<span class="rw-top3-pil">{_display_sector(sector)}</span></div>'
-        )
-    return f'<div class="rw-top3">{rows}</div>'
-
-
-def render_portfolio_overview(stats: PortfolioStats) -> None:
-    """Portfolio-level overview: 4-tile top row, then a 2-column body."""
-    mean_status = "good" if stats.mean_risk < 35 else "warning" if stats.mean_risk < 65 else "bad"
-    mean_color = status_color(mean_status)
-    hhi_status = (
-        "bad"
-        if stats.hhi_label == "high"
-        else "warning"
-        if stats.hhi_label == "moderate"
-        else "good"
-    )
-    hhi_color = status_color(hhi_status)
-    ctry_status = (
-        "bad"
-        if stats.country_concentration_pct >= 80
-        else ("warning" if stats.country_concentration_pct >= 50 else "good")
-    )
-    ctry_color = status_color(ctry_status)
-
-    top_row = "".join(
-        [
-            _ov_tile_html(
-                ic_gauge(20),
-                "Portfolio mean risk",
-                f"{stats.mean_risk:.0f}/100",
-                "across all borrowers",
-                mean_color,
-            ),
-            _ov_tile_html(
-                ic_factory(20),
-                "Sector concentration",
-                f"{stats.hhi:.0f}",
-                f"{stats.hhi_label} (HHI)",
-                hhi_color,
-            ),
-            _ov_tile_html(
-                ic_globe(20),
-                "Country concentration",
-                f"{stats.country_concentration_pct:.0f}%",
-                f"{stats.n_distinct_countries} country",
-                ctry_color,
-            ),
-            _ov_tile_html(
-                ic_activity(20),
-                "Data coverage",
-                f"{stats.data_coverage_pct:.0f}%",
-                "backed by landed data",
-                "#a1a1aa",
-            ),
-        ]
-    )
-
-    sectors_html = "".join(_sector_html(s) for s in stats.sectors)
-    sectors_html = f'<div class="rw-sectors">{sectors_html}</div>'
-
-    right_panel = (
-        '<div class="rw-panel">'
-        '<div class="rw-panel-title">Risk distribution</div>'
-        + _distribution_html(stats.n_good, stats.n_warning, stats.n_bad, stats.n_companies)
-        + "</div>"
-        '<div class="rw-panel">'
-        '<div class="rw-panel-title">Top 3 risk borrowers</div>'
-        + _top3_html(stats.top_risk)
-        + "</div>"
-    )
-    if stats.worst_indicator_id:
-        worst_icon = Icon(16, _worst_icon_paths())
-        right_panel += (
-            '<div class="rw-panel"><div class="rw-panel-title">Worst-performing indicator</div>'
-            f'<div class="rw-worst-row">{worst_icon}'
-            f'<span class="rw-worst-label">{stats.worst_indicator_label}</span>'
-            f'<span class="rw-worst-score">mean {stats.worst_indicator_mean:.0f}/100</span></div></div>'
-        )
-    chips = ""
-    chips += (
-        f'<div class="rw-chip"><span class="rw-icon" style="color:#fb923c">'
-        f"{ic_shield(15)}</span>"
-        f"<span>{stats.total_sanctions_flags} sanctions flags</span></div>"
-    )
-    if stats.mean_sentiment is not None:
-        sent_color = "#34d399" if stats.mean_sentiment > 0 else "#f87171"
-        chips += (
-            f'<div class="rw-chip"><span class="rw-icon" style="color:{sent_color}">'
-            f"{ic_newspaper(15)}</span>"
-            f"<span>news tone {stats.mean_sentiment:+.1f}</span></div>"
-        )
-    right_panel += f'<div class="rw-chips">{chips}</div>'
 
     html = f"""
-    <div class="rw-ov">
-      <div class="rw-ov-top">{top_row}</div>
-      <hr class="rw-ov-divider">
-      <div class="rw-ov-body">
-        <div class="rw-ov-left">
-          <div class="rw-panel-title">Sector exposure</div>
-          {sectors_html}
+    <div class="pb-co-card">
+      <div class="pb-co-head">
+        <div class="pb-co-score" style="background:{tok["bg"]};color:{fg}">{composite:.0f}</div>
+        <div class="pb-co-titles">
+          <div class="pb-co-name">{_esc(name)}</div>
+          <div class="pb-co-meta">
+            <span class="pb-pill" style="background:{tok["bg"]};color:{tok["fg"]};border:1px solid {tok["bd"]}">{status}</span>
+            <span class="pb-co-ticker">{_esc(ticker or "")}</span>
+            <span style="color:var(--ink-400);">\u00b7</span>
+            <span>{sector_pretty}</span>
+          </div>
         </div>
-        <div class="rw-ov-right">{right_panel}</div>
+        <div class="pb-co-comp">
+          <div class="pb-co-comp-num" style="color:{fg}">{composite:.0f}</div>
+          <div class="pb-co-comp-lbl">composite / 100</div>
+        </div>
       </div>
+      <div class="pb-rows">{body_rows}</div>
+      {src_html}
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)
-
-
-def _worst_icon_paths() -> str:
-    return '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>'

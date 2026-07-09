@@ -1,11 +1,11 @@
 [theme]
-base = "dark"
-# Primary accent color used across widgets
-primaryColor = "#e5e7eb"
-# Main app background (deep charcoal)
-backgroundColor = "#0a0a0a"
-# Secondary surfaces (sidebar, cards, inputs)
-secondaryBackgroundColor = "#141414"
-# Default text color
-textColor = "#fafafa"
+base = "light"
+primaryColor = "#DB0011"
+backgroundColor = "#F5F5F5"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1A1A1A"
 font = "sans serif"
+
+[client]
+toolbarMode = "minimal"
+showErrorDetails = false
