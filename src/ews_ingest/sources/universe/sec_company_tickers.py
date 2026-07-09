@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import Identifiers, RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 from ews_ingest.providers import sec
@@ -13,7 +14,7 @@ from ews_ingest.providers import sec
 __all__ = ["SecCompanyTickers", "parse"]
 
 
-def parse(rows: list[object]) -> list[RecordInput]:
+def parse(rows: list[dict[str, object]]) -> list[RecordInput]:
     """Build a CIK/ticker identifier record per issuer row."""
     out: list[RecordInput] = []
     for row in rows:
@@ -37,7 +38,7 @@ def parse(rows: list[object]) -> list[RecordInput]:
     return out
 
 
-@register_source("universe.sec_company_tickers")
+@register_source("universe.sec_company_tickers", scope=Scope.UNIVERSE)
 class SecCompanyTickers:
     """Seed the public corporate universe from SEC company_tickers_exchange.json."""
 

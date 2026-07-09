@@ -61,7 +61,7 @@ _IND_ICON = {
     "industry": (ic_factory, "#a78bfa"),  # violet
     "volatility": (ic_trending, "#f472b6"),  # pink
     "geopolitical": (ic_shield, "#fb923c"),  # orange
-    "demand_trend": (ic_trending, "#34d399"),  # emerald
+    "general_demand": (ic_trending, "#34d399"),  # emerald
     "regulation": (ic_scale, "#fbbf24"),  # amber
     "supply_chain": (ic_boxes, "#22d3ee"),  # cyan
     "profitability": (ic_bar_chart, "#a3e635"),  # lime
@@ -69,12 +69,13 @@ _IND_ICON = {
     "news_sentiment": (ic_newspaper, "#c084fc"),  # purple
 }
 
-# Semantic metaphors
-_SECTOR_ICON = {
-    "transport_logistics": ic_boxes,
-    "airlines": ic_activity,
-    "petrochemical": ic_factory,
-}
+
+def _display_sector(sector: str) -> str:
+    """Format a free-form sector string for display. Returns ``"—"`` for empty."""
+    if not sector:
+        return "—"
+    return sector.title()
+
 
 _THEME_CSS = """
 <style>
@@ -309,6 +310,12 @@ _THEME_CSS = """
 
   /* panels gap */
   .rw-ov-right { display: flex; flex-direction: column; gap: 1.1rem; }
+
+  /* hide Streamlit's sticky header (top bar + toolbar) */
+  [data-testid="stHeader"] { display: none; }
+  #MainMenu { visibility: hidden; }
+  footer { visibility: hidden; }
+  [data-testid="stToolbar"] { display: none; }
 </style>
 """
 
@@ -431,7 +438,7 @@ def render_company_card(
     """
     tok = _token(status)
     fg = tok["fg"]
-    sector_pretty = sector.replace("_", " ").title()
+    sector_pretty = _display_sector(sector)
     body_rows = "".join(_row_html(iid, label, desc, result) for iid, label, desc, result in rows)
     srcs = [s for s in sources if s]
     src_html = ""
@@ -503,8 +510,8 @@ def _distribution_html(n_good: int, n_warn: int, n_bad: int, n_total: int) -> st
 def _sector_html(sec: SectorStat) -> str:
     status = "good" if sec.mean_risk < 35 else "warning" if sec.mean_risk < 65 else "bad"
     color = status_color(status)
-    icon = _SECTOR_ICON.get(sec.sector, ic_factory)(15)
-    name = sec.sector.replace("_", " ").title()
+    icon = ic_factory(15)
+    name = _display_sector(sec.sector)
     return (
         '<div class="rw-sector-row">'
         f'<span class="rw-icon" style="color:{color}">{icon}</span>'
@@ -524,7 +531,7 @@ def _top3_html(top: list[tuple[str, float, str]]) -> str:
             f'<div class="rw-top3-row"><span class="rw-top3-num">{i}</span>'
             f'<span class="rw-top3-name">{name}</span>'
             f'<span class="rw-top3-score">{score:.0f}</span>'
-            f'<span class="rw-top3-pil">{sector.replace("_", " ").title()}</span></div>'
+            f'<span class="rw-top3-pil">{_display_sector(sector)}</span></div>'
         )
     return f'<div class="rw-top3">{rows}</div>'
 

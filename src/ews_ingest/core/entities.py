@@ -19,7 +19,6 @@ class EntityResolver(Protocol):
     def all(self) -> list[Identifiers]: ...
     def find_cik(self, cik: str) -> Identifiers | None: ...
     def find_ticker(self, ticker: str) -> Identifiers | None: ...
-    def find_lei(self, lei: str) -> Identifiers | None: ...
     def find_usdot(self, usdot: str) -> Identifiers | None: ...
     def find_epa_frs(self, epa_frs_id: str) -> Identifiers | None: ...
 
@@ -31,7 +30,6 @@ class YamlEntityResolver:
         self._entities = entities
         self._by_cik = {e.cik: e for e in entities if e.cik}
         self._by_ticker = {e.ticker: e for e in entities if e.ticker}
-        self._by_lei = {e.lei: e for e in entities if e.lei}
         self._by_usdot = {e.usdot: e for e in entities if e.usdot}
         self._by_epa = {e.epa_frs_id: e for e in entities if e.epa_frs_id}
 
@@ -52,9 +50,6 @@ class YamlEntityResolver:
 
     def find_ticker(self, ticker: str) -> Identifiers | None:
         return self._by_ticker.get(ticker)
-
-    def find_lei(self, lei: str) -> Identifiers | None:
-        return self._by_lei.get(lei)
 
     def find_usdot(self, usdot: str) -> Identifiers | None:
         return self._by_usdot.get(usdot)

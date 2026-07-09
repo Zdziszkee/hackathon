@@ -17,6 +17,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 
@@ -44,7 +45,10 @@ def parse(raw: dict[str, object]) -> list[RecordInput]:
     return [RecordInput(payload={"trade_row": r}, raw_format=RawFormat.JSON) for r in items]
 
 
-@register_source("supply_chain.un_comtrade")
+@register_source(
+    "supply_chain.un_comtrade",
+    scope=Scope.SECTOR_AGGREGATE,
+)
 class UnComtrade:
     """Pull US-reported trade flows for sector-relevant commodity codes."""
 

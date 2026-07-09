@@ -7,6 +7,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 from ews_ingest.providers import fred
@@ -26,7 +27,7 @@ def parse(raw: dict[str, object]) -> list[RecordInput]:
     return [RecordInput(payload=raw, raw_format=RawFormat.JSON)]
 
 
-@register_source("pricing.fred_pricing")
+@register_source("pricing.fred_pricing", scope=Scope.SECTOR_AGGREGATE)
 class FredPricing:
     """Pull FRED PPI/CPI mirror series (5y rolling)."""
 

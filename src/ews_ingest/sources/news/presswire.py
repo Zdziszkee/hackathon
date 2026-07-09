@@ -8,12 +8,15 @@ import feedparser
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 
 __all__ = ["Presswire", "parse"]
 
-# Known sector/industry press-wire RSS feeds (free, public).
+# Known free, public industry RSS feeds. These are not sector-routed at
+# runtime (the sector vocabulary is gone) — they're a fixed pair of
+# general-interest feeds the dashboard keeps landing.
 FEEDS: tuple[str, ...] = (
     "https://www.globenewswire.com/rss/industry/413/Transportation",
     "https://www.globenewswire.com/rss/industry/226/Chemicals",
@@ -38,7 +41,7 @@ def parse(text: str) -> list[RecordInput]:
     return [_entry(entry) for entry in feed.entries]
 
 
-@register_source("news.presswire")
+@register_source("news.presswire", scope=Scope.SECTOR_AGGREGATE)
 class Presswire:
     """Aggregates the configured press-wire RSS feeds."""
 

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
+import httpx
+
 from ews_ingest.core.context import FetchContext
-from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.models import Identifiers, RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 from ews_ingest.providers import gdelt as api
@@ -13,13 +16,6 @@ from ews_ingest.providers.gdelt import DISTRESS_KEYWORDS
 
 __all__ = ["GdeltNews", "parse"]
 
-# Sector-level distress query terms (spec §2 example phrasing).
-SECTOR_QUERIES: tuple[str, ...] = (
-    "diesel driver shortage",
-    "refinery outage chemicals",
-    "airline bankruptcy restructuring",
-    "trucking layoffs",
-)
 
 _ALIGNMENT = " | ".join(DISTRESS_KEYWORDS)
 
@@ -35,9 +31,9 @@ def parse(raw: dict[str, object]) -> list[RecordInput]:
     return [RecordInput(payload={"article": a}, raw_format=RawFormat.JSON) for a in items]
 
 
-@register_source("news.gdelt")
+@register_source("news.gdelt", scope=Scope.PER_ENTITY)
 class GdeltNews:
-    """Per-entity + sector distress article search via GDELT v2 doc endpoint."""
+    """Per-entity distress article search via GDELT v2 doc endpoint."""
 
     source_id = "news.gdelt"
     source_type = SourceType.API
@@ -47,13 +43,37 @@ class GdeltNews:
             if not entity.name:
                 continue
             query = _entity_query(entity.name)
+            yield from self._safe_search(ctx, query, entities=[entity])
+
+    @staticmethod
+    def _safe_search(
+        ctx: FetchContext,
+        query: str,
+        *,
+        entities: list[Identifiers] | None = None,
+    ) -> Iterator[RawRecord]:
+        """Run one GDELT doc search, resilient to rate-limit / non-JSON errors.
+
+        GDELT's public endpoint periodically returns a 429 or an HTML body
+        instead of JSON (and ``HttpClient.request`` raises ``HTTPStatusError``
+        on the 4xx even after retries). One failed query must not abort the
+        whole run — we log + skip so the remaining companies still land.
+        """
+        url = "https://api.gdeltproject.org/api/v2/doc/doc"
+        try:
             raw = api.doc_search(ctx.http, ctx.rate_policy, query=query)
-            for spec in parse(raw):
-                spec.entities = [entity]
-                spec.url = "https://api.gdeltproject.org/api/v2/doc/doc"
-                yield build_record(ctx, self.source_id, self.source_type, spec)
-        for query in SECTOR_QUERIES:
-            raw = api.doc_search(ctx.http, ctx.rate_policy, query=query)
-            for spec in parse(raw):
-                spec.url = "https://api.gdeltproject.org/api/v2/doc/doc"
-                yield build_record(ctx, self.source_id, self.source_type, spec)
+        except httpx.HTTPStatusError as exc:
+            ctx.logger.warning(
+                "gdelt query failed: %s status=%s",
+                query[:60],
+                exc.response.status_code,
+            )
+            return
+        except Exception as exc:
+            ctx.logger.warning("gdelt query error: %s status=NA %s", query[:60], exc)
+            return
+        for spec in parse(raw):
+            if entities:
+                spec.entities = list(entities)
+            spec.url = url
+            yield build_record(ctx, "news.gdelt", SourceType.API, spec)

@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 from ews_ingest.providers import bts
@@ -15,7 +16,7 @@ __all__ = ["BtsTranstats"]
 FILES: tuple[str, ...] = ("T_SCHEDULE_T100_Domestic.zip", "T_AIRLINE_CARRIER_CODE.zip")
 
 
-@register_source("transport.bts_transtats")
+@register_source("transport.bts_transtats", scope=Scope.MANIFEST)
 class BtsTranstats:
     """Record TranStats bulk-file manifests (Form 41 / T-100)."""
 

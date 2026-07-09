@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 from ews_ingest.providers import fmcsa
@@ -15,7 +16,10 @@ __all__ = ["FmcsaNewEntrant"]
 FILES: tuple[str, ...] = ("new_entrant", "oos_orders")
 
 
-@register_source("transport.fmcsa_new_entrant")
+@register_source(
+    "transport.fmcsa_new_entrant",
+    scope=Scope.MANIFEST,
+)
 class FmcsaNewEntrant:
     """Record FMCSA new-entrant / out-of-service / authority-revocation manifests."""
 

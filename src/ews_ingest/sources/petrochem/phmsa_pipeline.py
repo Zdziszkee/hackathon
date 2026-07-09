@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 
@@ -17,7 +18,10 @@ URL = (
 )
 
 
-@register_source("petrochem.phmsa_pipeline")
+@register_source(
+    "petrochem.phmsa_pipeline",
+    scope=Scope.MANIFEST,
+)
 class PhmsaPipeline:
     """Record the PHMSA pipeline/hazmat incident bulk-file manifest."""
 

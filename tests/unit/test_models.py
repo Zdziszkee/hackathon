@@ -10,6 +10,9 @@ from ews_ingest.core.models import Identifiers, RawFormat, RawRecord, SourceType
 def test_identifiers_defaults() -> None:
     ident = Identifiers(name="Acme")
     assert ident.cik is None
+    assert ident.ticker is None
+    assert ident.usdot is None
+    assert ident.epa_frs_id is None
     assert ident.extra_ids == {}
 
 
@@ -18,6 +21,14 @@ def test_identifiers_ignores_unknown_keys() -> None:
     ident = Identifiers.model_validate({"name": "A", "unexpected": 1})
     assert ident.name == "A"
     assert "unexpected" not in ident.extra_ids
+
+
+def test_identifiers_free_form_sector_via_extra_ids() -> None:
+    # Sector is a free-form string from Yahoo; carried only in extra_ids.
+    ident = Identifiers.model_validate({"ticker": "AAPL", "extra_ids": {"sector": "Technology"}})
+    assert ident.extra_ids["sector"] == "Technology"
+    # No typed ``sector`` field on the model.
+    assert not hasattr(ident, "sector")
 
 
 def test_raw_record_roundtrip() -> None:

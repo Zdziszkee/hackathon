@@ -1,16 +1,26 @@
 """Streamlit entrypoint: ``streamlit run src/ews_ingest/dashboard/app.py``.
 
-Renders the portfolio-risk dashboard. Reads the borrower universe from
-``config/entities.yaml`` and the indicator bindings from
-``config/indicators.yaml``. A portfolio-level overview panel aggregates
-cross-borrower risk (concentration, exposure, distribution), then each company
-renders as a collapsible card with a vertical list of risk indicators supplied
-by auto-discovered :class:`SignalProvider` modules. The portfolio is
-cross-region as a whole — one binding map applies to every borrower.
+Renders the portfolio-risk dashboard. The borrower universe is a dynamic JSON
+store (see :mod:`ews_ingest.dashboard.company_store`) — users add companies by
+ticker from the dashboard; the store resolves CIK/name/sector from SEC EDGAR
+(landed ``universe.sec_company_tickers`` records first, then live lookup). The
+legacy ``config/entities.yaml`` is migrated into the JSON store the first time
+the dashboard boots. Indicator bindings come from ``config/indicators.yaml``.
+A portfolio-level overview panel aggregates cross-borrower risk (concentration,
+exposure, distribution), then each company renders as a collapsible card with a
+vertical list of risk indicators supplied by auto-discovered
+:class:`SignalProvider` modules. The portfolio is cross-region as a whole —
+one binding map applies to every borrower.
+
+Adding a ticker or clicking a per-card "Refresh" button schedules a
+:class:`PortfolioOnboarding` task via ``loop.create_task`` (the
+`asyncio-in-Streamlit pattern <https://sehmi-conscious.medium.com/got-that-asyncio-feeling-f1a7c37cab8b>`_);
+the task lifecycle is tracked in ``st.session_state["onboarding_tasks"]``.
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 import sys
@@ -20,16 +30,29 @@ from pathlib import Path
 
 import streamlit as st
 
-from ews_ingest.config import load_sources
+from ews_ingest.config import Services, load_sources, make_services
+from ews_ingest.core.http import HttpClient
+from ews_ingest.core.models import Identifiers
 from ews_ingest.dashboard.bindings import IndicatorBindings, load_bindings
 from ews_ingest.dashboard.companies import Company, load_companies
+from ews_ingest.dashboard.company_store import CompanyStore, TickerResolutionError
 from ews_ingest.dashboard.env import EnvResolver
 from ews_ingest.dashboard.landing import LandingReader
+from ews_ingest.dashboard.onboarding import (
+    OnboardingTask,
+    PortfolioOnboarding,
+)
 from ews_ingest.dashboard.signals import SignalContext, list_providers
 from ews_ingest.dashboard.signals.protocol import SignalProvider, SignalResult
 from ews_ingest.dashboard.stats import PortfolioStats, SectorStat
+from ews_ingest.dashboard.ticker_suggest import SecLiveTickerSuggest, TickerSuggest
+from ews_ingest.dashboard.yahoo_sector import (
+    SecLiveYahooSector,
+    SectorLookup,
+)
 
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
+LEGACY_ENTITIES_YAML = CONFIG_DIR / "entities.yaml"
 
 _THR_GOOD = 35.0
 _THR_BAD = 65.0
@@ -84,26 +107,49 @@ def _portfolio_stats(
     n_warning = sum(1 for sc in all_scores if _THR_GOOD <= sc < _THR_BAD)
     n_bad = sum(1 for sc in all_scores if sc >= _THR_BAD)
 
-    # sector aggregation + HHI
+    # sector aggregation + HHI. Sectors are free-form strings from
+    # ``extra_ids["sector"]`` (Yahoo), so the set is open-ended. We
+    # show the top 10 individually and roll the rest into an
+    # "Other" bucket.
     sec_counts: dict[str, int] = {}
     sec_scores: dict[str, list[float]] = {}
     for co, _res, sc, _fl in computed:
-        sec_counts[co.sector] = sec_counts.get(co.sector, 0) + 1
-        sec_scores.setdefault(co.sector, []).append(sc)
-    sectors = sorted(
-        (
-            SectorStat(
-                sector=s,
-                count=c,
-                share_pct=c / n * 100,
-                mean_risk=sum(sec_scores[s]) / len(sec_scores[s]),
-            )
-            for s, c in sec_counts.items()
-        ),
-        key=lambda x: -x.count,
-    )
+        sec_label = co.sector or "(unknown)"
+        sec_counts[sec_label] = sec_counts.get(sec_label, 0) + 1
+        sec_scores.setdefault(sec_label, []).append(sc)
+    # HHI uses the full open set so the concentration metric is accurate.
     hhi = sum((c / n * 100) ** 2 for c in sec_counts.values())
     hhi_label = "high" if hhi > _HHI_HIGH else "moderate" if hhi > _HHI_MODERATE else "low"
+
+    # Display bucketing: top 10 by count, rest rolled into "Other".
+    top = sorted(sec_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
+    other_count = sum(c for _, c in sec_counts.items()) - sum(c for _, c in top)
+    sectors: list[SectorStat] = []
+    for sec_label, count in top:
+        sectors.append(
+            SectorStat(
+                sector=sec_label,
+                count=count,
+                share_pct=count / n * 100,
+                mean_risk=sum(sec_scores[sec_label]) / len(sec_scores[sec_label]),
+            )
+        )
+    if other_count > 0:
+        # Mean risk across the rolled-up bucket (still in the unrolled
+        # ``sec_scores`` map — sum the contributions from non-top sectors).
+        other_scores: list[float] = []
+        for sec_label, _count in sec_counts.items():
+            if sec_label not in {s for s, _ in top}:
+                other_scores.extend(sec_scores[sec_label])
+        mean_risk_other = sum(other_scores) / len(other_scores) if other_scores else 0.0
+        sectors.append(
+            SectorStat(
+                sector="Other",
+                count=other_count,
+                share_pct=other_count / n * 100,
+                mean_risk=mean_risk_other,
+            )
+        )
 
     # country concentration
     countries: dict[str, int] = {}
@@ -161,6 +207,7 @@ def _portfolio_stats(
         n_warning=n_warning,
         n_bad=n_bad,
         sectors=sectors,
+        sector_other_count=other_count,
         hhi=hhi,
         hhi_label=hhi_label,
         countries=countries,
@@ -187,11 +234,119 @@ def _make_env_resolver() -> EnvResolver:
     return EnvResolver.from_required_map(required)
 
 
+def _companies_path() -> Path:
+    """Resolve the dynamic JSON company-store path (env-overridable)."""
+    return Path(
+        os.environ.get(
+            "EWS_COMPANIES_PATH",
+            Path(os.environ.get("EWS_COMPANIES_DIR", "./data/companies")) / "companies.json",
+        )
+    )
+
+
+def _landing_lookup_factory(landing: LandingReader) -> Callable[[str], list[dict[str, object]]]:
+    """Adapter: ``source_id -> list[{"payload":..., "entities":[...]}]``.
+
+    Lets :class:`CompanyStore` resolve tickers/SICs from landed JSONL without
+    taking a direct dependency on :mod:`ews_ingest.dashboard.landing`.
+    """
+
+    def _lookup(source_id: str) -> list[dict[str, object]]:
+        out: list[dict[str, object]] = []
+        for rec in landing.read(source_id).records:
+            out.append(
+                {
+                    **dict(rec.payload),
+                    "entities": [e.model_dump(mode="json") for e in rec.entities],
+                }
+            )
+        return out
+
+    return _lookup
+
+
+def _ensure_company_store_bootstrap(store: CompanyStore) -> None:
+    """One-time backfill: if the JSON store is empty, port the legacy
+    ``entities.yaml`` seed into it. Idempotent."""
+    if not LEGACY_ENTITIES_YAML.exists():
+        return
+    if store.load():
+        return
+    seeded = store.seed_from_yaml(LEGACY_ENTITIES_YAML)
+    if seeded:
+        st.toast(f"Seeded {seeded} companies from legacy entities.yaml.", icon="📥")
+
+
+def _new_http_client() -> HttpClient:
+    return HttpClient(sec_user_agent=os.environ.get("SEC_USER_AGENT"))
+
+
+def _new_company_store(
+    landing: LandingReader,
+    http: HttpClient | None = None,
+    sector_lookup: SectorLookup | None = None,
+) -> CompanyStore:
+    # An HttpClient is only needed for live SEC ticker/SIC enrichment fallback.
+    # We construct one lazily so the dashboard still boots if SEC_USER_AGENT is
+    # unset (resolution then falls back to landed data + final SEC lookup uses
+    # the client's default agent).
+    if http is None:
+        http = _new_http_client()
+    return CompanyStore(
+        _companies_path(),
+        http=http,
+        landing_lookup=_landing_lookup_factory(landing),
+        sector_lookup=sector_lookup,
+    )
+
+
+def _new_ticker_suggest(http: HttpClient | None = None) -> TickerSuggest:
+    if http is None:
+        http = _new_http_client()
+    return SecLiveTickerSuggest(http)
+
+
+def _new_sector_lookup(http: HttpClient | None = None) -> SectorLookup:
+    if http is None:
+        http = _new_http_client()
+    return SecLiveYahooSector(http)
+
+
+def _new_services(landing_dir: Path) -> Services:
+    """Build a :class:`Services` bundle rooted at ``landing_dir``.
+
+    Used by the onboarding orchestrator — the rest of the dashboard uses
+    the smaller DI pair (``_new_http_client`` etc.) because the
+    :class:`CompanyStore` and ticker suggester don't need the full bundle.
+    """
+    from ews_ingest.cli import _default_entities_path
+
+    return make_services(
+        landing_dir=landing_dir,
+        entities_path=_default_entities_path(),
+        sources_path=CONFIG_DIR / "sources.yaml",
+        sec_user_agent=os.environ.get("SEC_USER_AGENT"),
+    )
+
+
 @lru_cache(maxsize=1)
-def _cached_inputs() -> tuple[list[Company], LandingReader, EnvResolver]:
-    companies = load_companies(CONFIG_DIR / "entities.yaml")
+def _cached_inputs() -> tuple[
+    list[Company], LandingReader, EnvResolver, CompanyStore, TickerSuggest
+]:
     landing_dir = Path(os.environ.get("EWS_LANDING_DIR", "./data/landing"))
-    return companies, LandingReader(landing_dir), _make_env_resolver()
+    landing = LandingReader(landing_dir)
+    http = _new_http_client()
+    sector_lookup = _new_sector_lookup(http=http)
+    store = _new_company_store(landing, http=http, sector_lookup=sector_lookup)
+    _ensure_company_store_bootstrap(store)
+    suggest = _new_ticker_suggest(http=http)
+    companies = load_companies(store.path)
+    return companies, landing, _make_env_resolver(), store, suggest
+
+
+def _bust_inputs_cache() -> None:
+    """Force :func:`_cached_inputs` to re-read the JSON store on next render."""
+    _cached_inputs.cache_clear()
 
 
 @lru_cache(maxsize=1)
@@ -222,6 +377,133 @@ def _collect_sources(
 
 
 # ---------------------------------------------------------------------------
+# Async onboarding (loop.create_task + st.session_state registry)
+# ---------------------------------------------------------------------------
+
+
+_SESSION_TASKS_KEY = "ews_onboarding_tasks"
+_SESSION_TICKER = "ews_onboarding_ticker"
+# Cap concurrent in-flight tasks (LRU). 32 is well above what a single
+# dashboard session can reasonably queue; protects against unbounded growth
+# if the user spam-clicks Add.
+_MAX_IN_FLIGHT = 32
+
+
+def _ensure_session_tasks() -> dict[str, OnboardingTask]:
+    """Return the per-session in-flight task registry (lazy-initialized)."""
+    return st.session_state.setdefault(_SESSION_TASKS_KEY, {})  # type: ignore[return-value]
+
+
+def _running_loop() -> asyncio.AbstractEventLoop:
+    """Return a running asyncio event loop, creating one if absent.
+
+    Streamlit's Tornado server already has a loop; we reuse it via
+    ``asyncio.get_running_loop``. Outside Streamlit (tests) the
+    :func:`asyncio.new_event_loop` fallback is used so the dashboard
+    module remains importable without a running loop.
+    """
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop
+
+
+def _schedule_onboarding(identifier: Identifiers) -> OnboardingTask:
+    """Schedule a background fetch for ``identifier`` and register it.
+
+    Returns the :class:`OnboardingTask` immediately. The task runs in
+    the background on the running event loop; the dashboard polls its
+    status via :func:`_render_onboarding_panels` on every rerun.
+    """
+    landing_dir = Path(os.environ.get("EWS_LANDING_DIR", "./data/landing"))
+    services = _new_services(landing_dir)
+    onboarding = PortfolioOnboarding(services, http=services.http)
+
+    task = OnboardingTask(
+        task_id=__import__("uuid").uuid4().hex[:12],
+        ticker=identifier.ticker or "?",
+        sector=identifier.extra_ids.get("sector", ""),
+        started_at=__import__("datetime").datetime.now(__import__("datetime").UTC),
+    )
+
+    async def _runner() -> None:
+        completed = await onboarding.refresh_async(identifier)
+        # Copy the completed-state fields onto the registered task so the
+        # progress panel updates without a session_state re-key.
+        task.sources_total = completed.sources_total
+        task.sources_done = completed.sources_done
+        task.sources_failed = completed.sources_failed
+        task.sources_written = completed.sources_written
+        task.status = completed.status
+        task.error = completed.error
+        task.sources_attempted = completed.sources_attempted
+        task.sources_succeeded = completed.sources_succeeded
+        task.sources_errored = completed.sources_errored
+        task.finished_at = completed.finished_at
+        # Force the next render to re-read the JSON store + landing zone.
+        _bust_inputs_cache()
+
+    loop = _running_loop()
+    loop.create_task(_runner())
+
+    state = _ensure_session_tasks()
+    ticker = (identifier.ticker or "").upper()
+    if ticker in state:
+        # A previous in-flight task for the same ticker — keep the most
+        # recent. The earlier one's records may still be landing; we don't
+        # cancel it explicitly (its coroutine will complete and write to
+        # the landing zone idempotently).
+        pass
+    state[ticker] = task
+    # LRU eviction: keep at most _MAX_IN_FLIGHT entries.
+    if len(state) > _MAX_IN_FLIGHT:
+        oldest = sorted(state.items(), key=lambda kv: kv[1].started_at)[0][0]
+        del state[oldest]
+    return task
+
+
+def _render_onboarding_panels() -> bool:
+    """Render a status panel for every in-flight onboarding task.
+
+    Returns True if any task is still running (the caller should
+    ``st.rerun()`` to keep polling); False when the queue is empty or
+    every task is in a terminal state (the caller can stop polling).
+    """
+    state = _ensure_session_tasks()
+    if not state:
+        return False
+    any_running = False
+    for ticker, task in list(state.items()):
+        progress = f"{task.sources_done + task.sources_failed}/{task.sources_total}"
+        with st.status(
+            f"Fetching {ticker} data ({progress})",
+            state=("running" if task.status == "running" else "complete"),
+            expanded=task.status == "running",
+        ):
+            bar_value = task.progress_fraction()
+            st.progress(min(1.0, bar_value))
+            st.caption(
+                f"elapsed: {task.elapsed_seconds():.1f}s · "
+                f"ok: {task.sources_done} · failed: {task.sources_failed} · "
+                f"records: {task.sources_written}"
+            )
+            if task.sources_attempted:
+                st.caption("sources: " + ", ".join(task.sources_attempted))
+            if task.status == "running":
+                any_running = True
+            else:
+                st.session_state[_SESSION_TICKER] = ticker
+    return any_running
+
+
+def _bust_onboarding_session() -> None:
+    """Drop the per-session in-flight task registry (used on Remove)."""
+    st.session_state.pop(_SESSION_TASKS_KEY, None)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -236,10 +518,13 @@ def main() -> None:
     st.set_page_config(page_title="Portfolio Risk Dashboard", page_icon="📊", layout="wide")
     inject_theme()
 
-    companies, landing, env = _cached_inputs()
-    if not companies:
-        st.warning("No companies found in entities.yaml. Seed the borrower universe first.")
-        return
+    companies, landing, env, store, suggest = _cached_inputs()
+
+    # --- Add-company form (top-of-page, always visible) ------------------
+    _render_add_company_form(store, suggest)
+
+    # --- Onboarding status panels (one per in-flight task) ----------------
+    any_running = _render_onboarding_panels()
 
     providers = list_providers()
     if not providers:
@@ -254,15 +539,12 @@ def main() -> None:
         results, composite, flags = _compute_company(company, providers, ctx)
         computed.append((company, results, composite, flags))
 
-    # --- Header ---
-    st.markdown(
-        "<div style='font-size:1.6rem;font-weight:600;color:#fafafa;"
-        "letter-spacing:-0.02em;margin-bottom:0.2rem'>Portfolio Risk</div>"
-        "<div style='color:#52525b;font-size:0.82rem;margin-bottom:1.8rem'>"
-        "Borrower-level risk indicators from the ingestion-layer landing zone."
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    if not computed:
+        st.info(
+            "No companies yet. Add one above by ticker (e.g. `AAPL`, `MSFT`, "
+            "`UPS`) — its CIK, name, and sector are resolved from SEC EDGAR."
+        )
+        return
 
     # --- Portfolio overview panel ---
     stats = _portfolio_stats(computed)
@@ -271,17 +553,51 @@ def main() -> None:
 
     # --- Company cards, sorted by composite risk descending ---
     computed.sort(key=lambda x: -x[2])
+    in_flight = _ensure_session_tasks()
     for company, results, composite, _flags in computed:
         comp_status = _composite_status(composite)
-        render_company_card(
-            company.name,
-            company.sector,
-            company.ticker,
-            composite,
-            comp_status,
-            ((p.indicator_id, p.label, p.description, r) for p, r in results),
-            _collect_sources(results),
+        ticker = (company.ticker or "").upper()
+        is_refreshing = in_flight.get(ticker) is not None and (
+            in_flight[ticker].status == "running"
         )
+        # Per-card refresh button. Disabled while a refresh is in flight so
+        # the user can't double-fire; the status panel above the cards
+        # shows live progress.
+        refresh_cols = st.columns([8, 1])
+        with refresh_cols[1]:
+            if st.button(
+                "↻ Refresh",
+                key=f"ews_refresh_{ticker}",
+                disabled=is_refreshing,
+                help=(
+                    "Re-fetch every eligible source for this company."
+                    if not is_refreshing
+                    else "A refresh is already in progress."
+                ),
+            ):
+                # Re-resolve the identifier from the company store so we
+                # always pass the current `sector` (might have changed via
+                # the YAML/JSON pipeline).
+                _schedule_onboarding(company.identifiers)
+                st.rerun()
+        with refresh_cols[0]:
+            render_company_card(
+                company.name,
+                company.sector,
+                company.ticker,
+                composite,
+                comp_status,
+                ((p.indicator_id, p.label, p.description, r) for p, r in results),
+                _collect_sources(results),
+            )
+
+    # Keep polling while tasks are in flight; each panel update triggers
+    # a rerun so the progress bar advances. ~1Hz cadence is plenty.
+    if any_running:
+        import time
+
+        time.sleep(1.0)
+        st.rerun()
 
     with st.expander("Methodology", expanded=False):
         st.markdown(
@@ -293,6 +609,10 @@ def main() -> None:
 
 * swap a source for a category → re-point the role;
 * add a new indicator → drop a file in `signals/` and add its role.
+
+**Companies** are stored in `data/companies/companies.json` (editable from
+this dashboard). Add one by ticker; CIK + legal name + sector are resolved
+live from SEC EDGAR and persisted.
 
 **Data** comes from the ingestion-layer landing zone (`data/landing/`),
 keyed by `source_id`. When a source has not landed data yet, indicators show
@@ -313,6 +633,84 @@ Supplier Deliveries sub-indices parsed out of the landed PMI page text.
 from Yahoo Finance OHLCV (trailing 60 trading days).
 """
         )
+
+
+def _render_add_company_form(store: CompanyStore, suggest: TickerSuggest) -> None:
+    """Top-band form: ticker in -> resolved + persisted + cache busted.
+
+    Autocomplete: as the user types, the top 5 matches from ``suggest``
+    (live SEC lookup, cached in-memory) are rendered beneath the input
+    field as a caption. Clicking a match (via the ``st_autocomplete``-style
+    selectbox below the input) fills the field. The Add / Remove buttons
+    are unchanged.
+    """
+    cols = st.columns([3, 1, 8])
+    with cols[0]:
+        new_ticker = st.text_input(
+            "Add company",
+            placeholder="Ticker or company (e.g. AAPL, Apple, …)",
+            label_visibility="collapsed",
+            key="ews_add_company_ticker",
+        )
+    with cols[1]:
+        submitted = st.button("Add", use_container_width=True, key="ews_add_company_submit")
+    with cols[2]:
+        # Right-hand slot is informational only — keeps the form on one row.
+        removed = st.button(
+            "Remove",
+            use_container_width=False,
+            key="ews_remove_company_btn",
+            help="Remove the currently-typed ticker from the portfolio.",
+        )
+
+    # Autocomplete: surface the top 5 matches as a clickable selectbox that
+    # pre-fills the text input via session state. We catch and ignore any
+    # failure from the live SEC lookup so the form keeps working offline.
+    matches: list[Identifiers] = []
+    if new_ticker and new_ticker.strip():
+        try:
+            matches = suggest.suggest(new_ticker, limit=5)
+        except Exception as exc:
+            st.caption(f"Autocomplete unavailable: {exc}")
+            matches = []
+        if matches:
+            options = [f"{m.ticker} — {m.name}" if m.name else (m.ticker or "?") for m in matches]
+            st.caption("Suggestions: " + " · ".join(options))
+
+    if submitted:
+        ticker = (new_ticker or "").strip()
+        if not ticker:
+            st.warning("Enter a ticker to add.")
+        else:
+            try:
+                added = store.add_ticker(ticker)
+            except TickerResolutionError as exc:
+                st.error(f"Could not resolve {ticker!r}: {exc}")
+            else:
+                _bust_inputs_cache()
+                # Kick off the per-ticker onboarding fetch in the
+                # background. The status panel renders via
+                # :func:`_render_onboarding_panels` from :func:`main`.
+                _schedule_onboarding(added)
+                sector_label = added.extra_ids.get("sector", "") or "(unknown)"
+                st.success(
+                    f"Added {added.ticker} ({added.name}) — "
+                    f"CIK={added.cik}, sector={sector_label}. "
+                    "Auto-fetching data in the background…"
+                )
+                st.rerun()
+
+    if removed:
+        ticker = (new_ticker or "").strip()
+        if not ticker:
+            st.warning("Enter a ticker to remove.")
+        elif store.remove_ticker(ticker):
+            _bust_inputs_cache()
+            _bust_onboarding_session()
+            st.toast(f"Removed {ticker.upper()} from the portfolio.", icon="🗑️")
+            st.rerun()
+        else:
+            st.warning(f"{ticker.upper()} is not in the portfolio.")
 
 
 if __name__ == "__main__":

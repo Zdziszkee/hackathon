@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
+import httpx
+
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import Identifiers, RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 from ews_ingest.providers import sec
@@ -28,7 +31,10 @@ def parse(raw: dict[str, object]) -> list[RecordInput]:
     return [RecordInput(payload=raw, raw_format=RawFormat.JSON, entities=[entity])]
 
 
-@register_source("company_financials.submissions")
+@register_source(
+    "company_financials.submissions",
+    scope=Scope.PER_ENTITY,
+)
 class SecSubmissions:
     """Per-entity submission history + filer metadata (CIK/ticker/SIC)."""
 
@@ -39,7 +45,18 @@ class SecSubmissions:
         for entity in ctx.resolver.all():
             if not entity.cik:
                 continue
-            raw = sec.submissions(ctx.http, ctx.rate_policy, entity.cik)
+            try:
+                raw = sec.submissions(ctx.http, ctx.rate_policy, entity.cik)
+            except httpx.HTTPStatusError as exc:
+                # One wrong/retired CIK must not abort the whole batch — log it
+                # and continue so the surviving good companies still land.
+                ctx.logger.warning(
+                    "submissions CIK=%s (%s) -> %s",
+                    entity.cik,
+                    entity.ticker or entity.name,
+                    exc.response.status_code,
+                )
+                continue
             for spec in parse(raw):
                 spec.entities = [entity]
                 spec.url = f"https://data.sec.gov/submissions/CIK{entity.cik.zfill(10)}.json"

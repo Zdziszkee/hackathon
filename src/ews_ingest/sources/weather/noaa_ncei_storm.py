@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 
@@ -14,7 +15,7 @@ __all__ = ["NoaaNceiStorm"]
 URL = "https://www.ncei.noaa.gov/pub/data/swdi/stormevents/csvfiles/"
 
 
-@register_source("weather.noaa_ncei_storm")
+@register_source("weather.noaa_ncei_storm", scope=Scope.MANIFEST)
 class NoaaNceiStorm:
     """Record the NCEI Storm Events bulk-file index manifest."""
 

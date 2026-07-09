@@ -4,8 +4,11 @@ Roles: ``industry.filer_sic`` (per-company SIC from SEC submissions) +
 ``industry.sic`` (SIC code -> industry title map) + ``industry.naics``
 (NAICS code -> title map, corroboration).
 
-Confidence: how cleanly the company maps to a single industry — based on the
-number of corroborating classifications (filer SIC, NAICS map, seeded sector).
+The card displays the raw ``sicDescription`` from SEC submissions
+("Services-Prepackaged Software", "National Commercial Banks", …) or
+the bare SIC code if the description isn't landed. Confidence is the
+number of corroborating classifications (filer SIC, NAICS map, any
+non-empty extra_ids sector).
 """
 
 from __future__ import annotations
@@ -25,40 +28,16 @@ __all__ = ["Provider", "compute"]
 
 ROLES: tuple[str, ...] = ("industry.filer_sic", "industry.sic", "industry.naics")
 
-_SIC_TO_SECTOR: dict[str, str] = {
-    "1311": "petrochemical (Oil & Gas Extraction)",
-    "1389": "petrochemical (Oil & Gas Field Services)",
-    "2820": "petrochemical (Chemicals)",
-    "2860": "petrochemical (Industrial Chemicals)",
-    "2911": "petrochemical (Petroleum Refining)",
-    "3080": "petrochemical (Plastics Products)",
-    "4011": "transport_logistics (Railroads)",
-    "4210": "transport_logistics (Trucking)",
-    "4213": "transport_logistics (Trucking)",
-    "4490": "transport_logistics (Marine Cargo)",
-    "4512": "airlines (Air Transport)",
-    "4522": "airlines (Air Transport)",
-    "4731": "transport_logistics (Freight Arrangement)",
-    "4700": "transport_logistics (Transport Services)",
-}
-
-
-def _sic_title_from_map(rows: list[dict[str, object]], code: str) -> str | None:
-    for r in rows:
-        sic = str(r.get("sic_code") or r.get("code") or "")
-        if sic == code:
-            return str(r.get("industry") or r.get("title") or "")
-    return None
-
 
 def _sic_info_from_submissions(
     submissions: list[dict[str, object]],
 ) -> tuple[list[str], str | None]:
     """Return (numeric SIC codes, sicDescription) from landed submission payloads.
 
-    The SEC submissions connector fetches per-CIK, so any field present belongs
-    to this company. The newer API exposes ``sicDescription`` (a label) without
-    always exposing the numeric ``sic`` code; we use whichever is present.
+    The SEC submissions connector fetches per-CIK, so any field present
+    belongs to this company. The newer API exposes ``sicDescription`` (a
+    label) without always exposing the numeric ``sic`` code; we use
+    whichever is present.
     """
     codes: list[str] = []
     description: str | None = None
@@ -101,28 +80,40 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
 
     filer_payloads: list[dict[str, object]] = []
     if filer_sid:
-        # records are per-company; only keep ones for this company
         for rec in ctx.landing.read(filer_sid).records:
             if _matches_entity(rec.entities, company):
                 filer_payloads.append(rec.payload)
 
     sic_codes, sic_description = _sic_info_from_submissions(filer_payloads)
     if not sic_codes and not sic_description:
-        # No filer data — but maybe a seeded sector mapping exists.
-        sector = str(company.extra_ids.get("sector", ""))
-        industry_title = sector.replace("_", " ").title() if sector else demo.industry()
-        confidence = demo.industry_confidence() if not sector else 80.0
-        note = (
-            "No SEC submissions landed — using seeded sector from entities.yaml."
-            if sector
-            else "No SEC submissions landed — showing demo industry."
-        )
+        # No filer data yet — fall back to the seeded sector string or a
+        # demo value. The sector is a free-form Yahoo string (not the
+        # legacy taxonomy), so we use it as a display label rather than
+        # as a routing key.
+        seeded_sector = str(company.extra_ids.get("sector", ""))
+        if seeded_sector:
+            industry_title = seeded_sector
+            confidence = 80.0
+            status = "good" if confidence >= 70 else "warning"
+            return SignalResult(
+                value=industry_title,
+                score=100.0 - confidence,
+                status=cast_status(status),
+                detail={
+                    "sic": "",
+                    "confidence": confidence,
+                    "corroborations": 1,
+                    "source": "seeded_sector",
+                },
+                source_ids=source_ids,
+                note=("No SEC submissions landed yet — using the sector set at onboarding."),
+            )
         return demo_result(
             label_hint="industry",
-            value=industry_title,
-            score=100.0 - confidence,
+            value=demo.industry(),
+            score=100.0 - demo.industry_confidence(),
             source_ids=source_ids,
-            note=note,
+            note="No SEC submissions landed and no seeded sector — showing demo industry.",
         )
 
     primary_sic = sic_codes[0] if sic_codes else ""
@@ -134,7 +125,6 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
 
     industry_title = (
         title_from_map
-        or (_SIC_TO_SECTOR.get(primary_sic) if primary_sic else None)
         or sic_description
         or (f"SIC {primary_sic}" if primary_sic else demo.industry())
     )
@@ -142,12 +132,10 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
     corroborations = 1
     if title_from_map:
         corroborations += 1
-    if str(company.extra_ids.get("sector", "")) and (
-        industry_title.lower().startswith(str(company.extra_ids["sector"]).split("_")[0])
-        or industry_title == _SIC_TO_SECTOR.get(primary_sic)
-    ):
-        corroborations += 1
     if naics_sid and ctx.landing.read(naics_sid).records:
+        corroborations += 1
+    # A non-empty seeded sector counts as a corroboration.
+    if company.extra_ids.get("sector"):
         corroborations += 1
 
     confidence = min(100.0, 40.0 + corroborations * 20.0)
@@ -175,7 +163,11 @@ class _Provider:
     indicator_id = "industry"
     label = "Industry & Confidence"
 
-    description = "Industry classification and confidence in that mapping. Based on SEC SIC and Census NAICS corroboration."
+    description = (
+        "Industry classification and confidence in that mapping. Based on "
+        "SEC SIC, Census NAICS corroboration, and the sector set at "
+        "onboarding."
+    )
     roles: tuple[str, ...] = ROLES
 
     def compute(self, company: Identifiers, ctx: SignalContext) -> SignalResult:

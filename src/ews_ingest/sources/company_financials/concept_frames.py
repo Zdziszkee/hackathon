@@ -9,6 +9,7 @@ import httpx
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 from ews_ingest.providers import sec
@@ -33,7 +34,10 @@ CROSS_FRAMES: tuple[tuple[str, str, str], ...] = (
 )
 
 
-@register_source("company_financials.concept_frames")
+@register_source(
+    "company_financials.concept_frames",
+    scope=Scope.PER_ENTITY,
+)
 class SecConceptFrames:
     """Per-entity concept time series + a few cross-company frames."""
 

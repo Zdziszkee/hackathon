@@ -11,6 +11,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 
@@ -24,7 +25,10 @@ def parse(text: str) -> list[RecordInput]:
     return [RecordInput(payload={"csv": text}, raw_format=RawFormat.CSV)]
 
 
-@register_source("supply_chain.lead_time")
+@register_source(
+    "supply_chain.lead_time",
+    scope=Scope.SECTOR_AGGREGATE,
+)
 class LeadTime:
     """Pull the NY Fed GSCPI CSV as a lead-time / supply-chain-pressure proxy."""
 

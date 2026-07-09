@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 
@@ -25,7 +26,10 @@ def parse(text: str) -> list[RecordInput]:
     return [RecordInput(payload={"page_text": text[:5000]}, raw_format=RawFormat.HTML)]
 
 
-@register_source("default_truth.state_sos_ucc")
+@register_source(
+    "default_truth.state_sos_ucc",
+    scope=Scope.SECTOR_AGGREGATE,
+)
 class StateSosUcc:
     """Scrape state SoS UCC search portals (format varies; per-state adapters later)."""
 

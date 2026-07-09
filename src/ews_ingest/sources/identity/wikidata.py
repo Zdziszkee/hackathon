@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 
@@ -31,7 +32,7 @@ def parse(raw: list[object]) -> list[RecordInput]:
     return [RecordInput(payload={"row": r}, raw_format=RawFormat.JSON) for r in raw]
 
 
-@register_source("identity.wikidata")
+@register_source("identity.wikidata", scope=Scope.PER_ENTITY)
 class Wikidata:
     """Per-entity ownership/exec graph via Wikidata SPARQL."""
 

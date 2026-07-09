@@ -11,6 +11,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 from ews_ingest.providers import gdelt as api
@@ -35,7 +36,10 @@ def parse(raw: dict[str, object]) -> list[RecordInput]:
     return [RecordInput(payload={"article": a}, raw_format=RawFormat.JSON) for a in items]
 
 
-@register_source("supply_chain.logistics_disruption")
+@register_source(
+    "supply_chain.logistics_disruption",
+    scope=Scope.SECTOR_AGGREGATE,
+)
 class LogisticsDisruption:
     """Pull sector-level logistics-disruption news via GDELT."""
 

@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 
@@ -22,7 +23,7 @@ def parse(text: str) -> list[RecordInput]:
     return [RecordInput(payload={"page_text": text[:5000]}, raw_format=RawFormat.HTML)]
 
 
-@register_source("macro.fed_releases")
+@register_source("macro.fed_releases", scope=Scope.SECTOR_AGGREGATE)
 class FedReleases:
     """Scrape Fed H.15 / G.17 release pages (CSV downloads discontinued)."""
 

@@ -11,6 +11,7 @@ import math
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast, override
 
 from ews_ingest.core.hashing import content_hash
 from ews_ingest.core.models import Identifiers, RawFormat, RawRecord, SourceType
@@ -25,6 +26,7 @@ from ews_ingest.dashboard.signals.ism import parse_ism
 from ews_ingest.dashboard.signals.macro_health import compute as macro_compute
 from ews_ingest.dashboard.signals.news_sentiment import compute as news_compute
 from ews_ingest.dashboard.signals.profitability import compute as profitability_compute
+from ews_ingest.dashboard.signals.protocol import SignalProvider, SignalResult
 from ews_ingest.dashboard.signals.regulation import compute as regulation_compute
 from ews_ingest.dashboard.signals.supply_chain import _gscpi_series, _zscore
 from ews_ingest.dashboard.signals.volatility import _closes, _realized_vol
@@ -87,7 +89,7 @@ def test_list_providers_discovers_all_indicators() -> None:
         "industry",
         "volatility",
         "geopolitical",
-        "demand_trend",
+        "general_demand",
         "regulation",
         "supply_chain",
         "profitability",
@@ -106,8 +108,14 @@ def test_load_companies_reads_universe() -> None:
 
 def test_bindings_resolve_roles() -> None:
     b = load_bindings(CONFIG / "indicators.yaml")
-    assert b.source_for("macro.mfg_pmi") == "macro.ism_pmi"
+    # macro.ism_pmi is now Cloudflare/SSO-walled & not mirrored to FRED — the
+    # role is intentionally unbound so macro_health honestly reports
+    # ``unavailable`` instead of misleading ``demo``.
+    assert b.source_for("macro.mfg_pmi") is None
+    assert b.source_for("macro.mfg_pmi") != "macro.ism_pmi"
     assert b.source_for("credit.ohlcv") == "credit_market.yahoo"
+    assert b.source_for("demand.truck") == "macro.fred_macro"
+    assert b.source_for("news.distress") == "news.gdelt"
 
 
 def test_ism_parser_extracts_subindices() -> None:
@@ -145,8 +153,26 @@ def test_gscpi_series_and_zscore() -> None:
     assert _zscore([1.0]) is None
 
 
+def _ctx_with_bindings(tmp_path: Path, roles: dict[str, str | None]) -> tuple[SignalContext, Path]:
+    """Test helper: bindings are config, so build a ctx with explicit role->source
+    bindings so a unit test of the *signal logic* does not break when production
+    config unbinds a role for honesty (e.g. ``macro.mfg_pmi: ~``)."""
+    landing_dir = tmp_path / "landing"
+    landing_dir.mkdir(parents=True, exist_ok=True)
+    ctx = SignalContext(
+        bindings=IndicatorBindings(roles),
+        landing=LandingReader(landing_dir),
+        env_present=lambda _sid: True,
+        missing_env=lambda _sid: [],
+    )
+    return ctx, landing_dir
+
+
 def test_macro_health_uses_landed_pmi(tmp_path: Path) -> None:
-    ctx, landing = _ctx(tmp_path)
+    # Bind explicitly: production config marks macro.mfg_pmi unbound (ISM is
+    # paywalled), so ``_ctx`` would yield ``unavailable``. The signal logic
+    # still works when a binding is present.
+    ctx, landing = _ctx_with_bindings(tmp_path, {"macro.mfg_pmi": "macro.ism_pmi"})
     _write_landing(
         landing,
         "macro.ism_pmi",
@@ -164,11 +190,19 @@ def test_macro_health_uses_landed_pmi(tmp_path: Path) -> None:
 
 
 def test_macro_health_demo_when_empty(tmp_path: Path) -> None:
-    ctx, _ = _ctx(tmp_path)
+    ctx, _ = _ctx_with_bindings(tmp_path, {"macro.mfg_pmi": "macro.ism_pmi"})
     result = macro_compute(UPS, ctx)
     assert result.status == "demo"
     assert isinstance(result.note, str)
     assert "demo" in result.note.lower()
+
+
+def test_macro_health_unavailable_when_unbound(tmp_path: Path) -> None:
+    # Production config: macro.mfg_pmi -> ~. The indicator reports
+    # ``unavailable`` (no binding), not ``demo``.
+    ctx, _ = _ctx_with_bindings(tmp_path, {"macro.mfg_pmi": None})
+    result = macro_compute(UPS, ctx)
+    assert result.status == "unavailable"
 
 
 def test_news_sentiment_aggregates_tone(tmp_path: Path) -> None:
@@ -221,7 +255,14 @@ def test_all_providers_demo_fallback_when_empty(tmp_path: Path) -> None:
     ctx, _ = _ctx(tmp_path)
     for provider in list_providers():
         result = provider.compute(UPS, ctx)
-        assert result.status in {"demo", "unavailable"}, (
+        # ``industry`` no longer falls back to ``demo`` when a sector is seeded
+        # at onboarding time — that sector is real, authoritative source data,
+        # so it returns ``good``/``warning`` with honest medium confidence.
+        if provider.indicator_id == "industry":
+            expected = {"demo", "unavailable", "good", "warning"}
+        else:
+            expected = {"demo", "unavailable"}
+        assert result.status in expected, (
             f"{provider.indicator_id}: {result.status} notes={result.note}"
         )
 
@@ -394,8 +435,6 @@ def test_portfolio_stats_risk_distribution() -> None:
 
 
 def test_portfolio_stats_worst_indicator() -> None:
-    from ews_ingest.dashboard.signals.protocol import SignalResult
-
     fake_results_a = [
         (
             FakeProvider("low", "Low Indicator", "desc", ("role",)),
@@ -416,10 +455,16 @@ def test_portfolio_stats_worst_indicator() -> None:
             SignalResult(value="2", score=90.0, status="bad"),
         ),
     ]
-    computed = [
-        (_fake_company("A", "petrochemical"), fake_results_a, 45.0, 0),
-        (_fake_company("B", "airlines"), fake_results_b, 55.0, 0),
-    ]
+    # ``_portfolio_stats`` is typed against the runtime-checkable ``SignalProvider``
+    # Protocol; ``FakeProvider`` satisfies it structurally. ty needs an explicit
+    # cast to accept the test double as a real provider.
+    computed = cast(
+        "list[tuple[Company, list[tuple[SignalProvider, SignalResult]], float, int]]",
+        [
+            (_fake_company("A", "petrochemical"), fake_results_a, 45.0, 0),
+            (_fake_company("B", "airlines"), fake_results_b, 55.0, 0),
+        ],
+    )
     stats = _portfolio_stats(computed)
     assert stats.worst_indicator_id == "high"
     assert stats.worst_indicator_label == "High Indicator"
@@ -427,7 +472,7 @@ def test_portfolio_stats_worst_indicator() -> None:
     assert stats.worst_indicator_mean == 85.0
 
 
-class FakeProvider:
+class FakeProvider(SignalProvider):
     """Minimal provider stub for stats tests."""
 
     def __init__(self, iid: str, label: str, description: str, roles: tuple[str, ...]) -> None:
@@ -436,5 +481,6 @@ class FakeProvider:
         self.description = description
         self.roles = roles
 
-    def compute(self, company: Identifiers, ctx: SignalContext) -> SignalResult:  # noqa: ARG002
+    @override
+    def compute(self, company: Identifiers, ctx: SignalContext) -> SignalResult:
         return SignalResult(value="0", score=0.0, status="demo")

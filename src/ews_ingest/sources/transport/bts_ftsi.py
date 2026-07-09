@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 from ews_ingest.providers import bts
@@ -17,7 +18,10 @@ def parse(rows: list[object]) -> list[RecordInput]:
     return [RecordInput(payload={"row": r}, raw_format=RawFormat.JSON) for r in rows]
 
 
-@register_source("transport.bts_ftsi")
+@register_source(
+    "transport.bts_ftsi",
+    scope=Scope.SECTOR_AGGREGATE,
+)
 class BtsFtsi:
     """Pull the Freight Transportation Services Index (Socrata rows)."""
 

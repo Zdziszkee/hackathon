@@ -11,6 +11,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 
@@ -27,7 +28,10 @@ def parse(raw: list[object]) -> list[RecordInput]:
     return [RecordInput(payload={"row": r}, raw_format=RawFormat.JSON) for r in items]
 
 
-@register_source("supply_chain.port_congestion")
+@register_source(
+    "supply_chain.port_congestion",
+    scope=Scope.SECTOR_AGGREGATE,
+)
 class PortCongestion:
     """Pull container port traffic (TEU) for supply-chain congestion proxy."""
 

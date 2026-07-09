@@ -91,6 +91,7 @@ ignore = [
 ]
 "src/ews_ingest/dashboard/icons.py" = ["E501", "N802", "RUF002"]
 "src/ews_ingest/dashboard/ui.py" = ["PLC0415", "PLR2004", "PLR0913", "E501"]
+"src/ews_ingest/dashboard/company_store.py" = ["PLC0415", "C901", "PLR2004", "S101", "BLE001"]
 "**/main.py" = ["T201"]
 
 [tool.pytest.ini_options]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -16,7 +17,7 @@ from ews_ingest.core.context import FetchContext
 from ews_ingest.core.entities import YamlEntityResolver
 from ews_ingest.core.http import HttpClient, RatePolicy
 from ews_ingest.core.landing import JsonlLandWriter
-from ews_ingest.core.models import SourceType
+from ews_ingest.core.models import Identifiers, SourceType
 from ews_ingest.core.scrape import Scraper
 
 __all__ = [
@@ -24,6 +25,7 @@ __all__ = [
     "SourceConfig",
     "build_context",
     "check_env",
+    "load_entities_file",
     "load_sources",
     "make_services",
 ]
@@ -81,6 +83,28 @@ class Services:
     sources: dict[str, SourceConfig]
 
 
+def load_entities_file(path: Path) -> list[Identifiers]:
+    """Read a company universe from a JSON or YAML file.
+
+    Both formats share the same ``Identifiers`` schema (an array of
+    ``Identifiers``-shaped dicts). The dashboard persists companies to JSON
+    (:mod:`ews_ingest.dashboard.company_store`); the legacy ``entities.yaml``
+    is supported for backfill and integration tests.
+    """
+    if not path.exists():
+        return []
+    if path.suffix == ".json":
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or []
+    if isinstance(raw, dict):
+        raw = raw.get("companies") if "companies" in raw else raw
+    if not isinstance(raw, list):
+        return []
+    entries = cast(list[dict[str, object]], raw)
+    return [Identifiers.model_validate(entry) for entry in entries]
+
+
 def make_services(
     *,
     landing_dir: Path,
@@ -88,7 +112,12 @@ def make_services(
     sources_path: Path,
     sec_user_agent: str | None = None,
 ) -> Services:
-    """Build the shared service bundle from config paths + env."""
+    """Build the shared service bundle from config paths + env.
+
+    ``entities_path`` may point to either ``entities.yaml`` (legacy, hand-curated)
+    or ``companies.json`` (dynamic, edited from the dashboard). The on-disk
+    schema is identical so both go through :func:`load_entities_file`.
+    """
     logger = logging.getLogger("ews_ingest")
     if not logger.handlers:
         handler = logging.StreamHandler()
@@ -101,7 +130,7 @@ def make_services(
         http=http,
         scraper=Scraper(http),
         writer=JsonlLandWriter(landing_dir),
-        resolver=YamlEntityResolver.from_yaml(entities_path),
+        resolver=YamlEntityResolver(load_entities_file(entities_path)),
         logger=logger,
         sources=load_sources(sources_path),
     )

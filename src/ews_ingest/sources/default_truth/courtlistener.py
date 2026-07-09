@@ -7,6 +7,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 
@@ -27,7 +28,10 @@ def _query(text: str) -> str:
     return text.replace(" ", "+")
 
 
-@register_source("default_truth.courtlistener")
+@register_source(
+    "default_truth.courtlistener",
+    scope=Scope.PER_ENTITY,
+)
 class Courtlistener:
     """Per-entity bankruptcy/docket search via CourtListener RECAP."""
 

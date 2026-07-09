@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 
@@ -18,7 +19,10 @@ def parse(raw: dict[str, object]) -> list[RecordInput]:
     return [RecordInput(payload=raw, raw_format=RawFormat.JSON)]
 
 
-@register_source("transport.fmcsa_sms")
+@register_source(
+    "transport.fmcsa_sms",
+    scope=Scope.SECTOR_AGGREGATE,
+)
 class FmcsaSms:
     """Record the FMCSA SMS BASIC violation bulk-file manifest."""
 

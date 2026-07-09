@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 
@@ -14,7 +15,7 @@ __all__ = ["OshaPsm"]
 URL = "https://www.osha.gov/establishment/search/Inspection-Data-All-Citations.csv"
 
 
-@register_source("petrochem.osha_psm")
+@register_source("petrochem.osha_psm", scope=Scope.MANIFEST)
 class OshaPsm:
     """Record the OSHA enforcement / PSM citation bulk-file manifest."""
 

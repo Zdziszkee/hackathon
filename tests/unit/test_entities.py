@@ -47,6 +47,6 @@ def test_empty_resolver_when_missing(tmp_path: Path) -> None:
     assert r.find_ticker("X") is None
 
 
-def test_all_three_sectors_present(resolver: YamlEntityResolver) -> None:
+def test_three_sectors_present(resolver: YamlEntityResolver) -> None:
     sectors = {e.extra_ids.get("sector") for e in resolver.all()}
     assert {"transport_logistics", "airlines", "petrochemical"} <= sectors

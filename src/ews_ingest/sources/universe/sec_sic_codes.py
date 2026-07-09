@@ -11,6 +11,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 
@@ -50,7 +51,10 @@ def parse(adaptor: object) -> list[RecordInput]:
     return out
 
 
-@register_source("universe.sec_sic_codes")
+@register_source(
+    "universe.sec_sic_codes",
+    scope=Scope.SECTOR_AGGREGATE,
+)
 class SecSicCodes:
     """Scrape the SEC SIC code list for industry classification."""
 

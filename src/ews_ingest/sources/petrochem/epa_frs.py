@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import Identifiers, RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 from ews_ingest.providers import epa
@@ -13,7 +14,7 @@ from ews_ingest.providers import epa
 __all__ = ["EpaFrs"]
 
 
-@register_source("petrochem.epa_frs")
+@register_source("petrochem.epa_frs", scope=Scope.PER_ENTITY)
 class EpaFrs:
     """Per-entity EPA FRS facility lookup (FRS ID crosswalk + geolocation)."""
 

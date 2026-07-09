@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 from ews_ingest.providers import sec
@@ -22,7 +23,7 @@ def parse(raw: dict[str, object]) -> list[RecordInput]:
     return [RecordInput(payload={"hit": h}, raw_format=RawFormat.JSON) for h in items]
 
 
-@register_source("identity.sec_proxy_forms")
+@register_source("identity.sec_proxy_forms", scope=Scope.PER_ENTITY)
 class SecProxyForms:
     """Per-entity DEF 14A / Form 3/4/5 filings via full-text search."""
 

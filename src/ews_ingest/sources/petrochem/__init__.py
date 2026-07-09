@@ -7,7 +7,6 @@ from ews_ingest.sources.petrochem import (  # noqa: F401
     eia_refinery,
     epa_echo,
     epa_frs,
-    epa_tri,
     osha_psm,
     phmsa_pipeline,
 )

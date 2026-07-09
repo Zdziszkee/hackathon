@@ -10,6 +10,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 from ews_ingest.providers import fred
@@ -24,7 +25,10 @@ def parse(raw: dict[str, object]) -> list[RecordInput]:
     return [RecordInput(payload=raw, raw_format=RawFormat.JSON)]
 
 
-@register_source("credit_market.fred_credit")
+@register_source(
+    "credit_market.fred_credit",
+    scope=Scope.SECTOR_AGGREGATE,
+)
 class FredCreditSpreads:
     """Credit-spread proxies (no single-name CDS exists)."""
 

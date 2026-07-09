@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 
@@ -15,7 +16,7 @@ __all__ = ["SecDeraBulk"]
 DERA_FILES: tuple[str, ...] = ("2024q1.zip", "2024q2.zip")
 
 
-@register_source("company_financials.dera_bulk")
+@register_source("company_financials.dera_bulk", scope=Scope.MANIFEST)
 class SecDeraBulk:
     """Record metadata for each quarterly DERA bulk zip (rows parsed later)."""
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import cast
 
 from ews_ingest.core.http import HttpClient, RatePolicy
 
@@ -78,12 +79,26 @@ def fulltext_search(
     return http.get_json(url, policy=policy, params=params)
 
 
-def tickers_exchange(http: HttpClient, policy: RatePolicy) -> list[object]:
+def tickers_exchange(http: HttpClient, policy: RatePolicy) -> list[dict[str, object]]:
     url = f"{FILES_BASE}/company_tickers_exchange.json"
     data = http.get_json(url, policy=policy)
-    body = data.get("results") if isinstance(data, dict) else data
+    if isinstance(data, list):
+        return cast("list[dict[str, object]]", [r for r in data if isinstance(r, dict)])
+    # Legacy response shape: ``{"results": [{"cik":..., "ticker":..., "name":...}, ...]}``
+    body = data.get("results") if isinstance(data, dict) else None
     if isinstance(body, list):
-        return list(body)
+        return cast("list[dict[str, object]]", [r for r in body if isinstance(r, dict)])
+    # New (2025) response shape: ``{"fields": ["cik","name","ticker","exchange"],
+    # "data": [[cik, name, ticker, exchange], ...]}`` — convert to dicts so
+    # downstream connectors' ``entry.get("cik")`` etc. keep working.
+    fields = data.get("fields") if isinstance(data, dict) else None
+    rows = data.get("data") if isinstance(data, dict) else None
+    if isinstance(fields, list) and isinstance(rows, list):
+        out: list[dict[str, object]] = []
+        for row in rows:
+            if isinstance(row, list) and len(row) == len(fields):
+                out.append({str(f): v for f, v in zip(fields, row, strict=True)})
+        return out
     return []
 
 

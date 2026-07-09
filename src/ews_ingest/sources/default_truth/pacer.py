@@ -11,12 +11,13 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.registry import register_source
 
 __all__ = ["Pacer"]
 
 
-@register_source("default_truth.pacer")
+@register_source("default_truth.pacer", scope=Scope.MANIFEST)
 class Pacer:
     """PACER fallback (stub — fee-based)."""
 

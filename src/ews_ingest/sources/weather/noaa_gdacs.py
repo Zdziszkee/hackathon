@@ -13,6 +13,7 @@ import feedparser
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 
@@ -51,7 +52,7 @@ def _first(entry: object, key: str) -> object:
     return None
 
 
-@register_source("weather.noaa_gdacs")
+@register_source("weather.noaa_gdacs", scope=Scope.SECTOR_AGGREGATE)
 class NoaaGdacs:
     """Pull global disaster alerts from GDACS RSS."""
 

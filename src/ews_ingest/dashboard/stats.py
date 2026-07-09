@@ -13,7 +13,12 @@ __all__ = ["PortfolioStats", "SectorStat"]
 
 @dataclass(frozen=True)
 class SectorStat:
-    """Aggregated risk for one sector."""
+    """Aggregated risk for one sector (or an "Other" bucket).
+
+    ``sector`` is the free-form string from ``extra_ids["sector"]`` (or
+    the literal ``"Other"`` for the rolled-up remainder when the
+    portfolio has more than 10 distinct sectors).
+    """
 
     sector: str
     count: int
@@ -31,6 +36,7 @@ class PortfolioStats:
     n_warning: int
     n_bad: int
     sectors: list[SectorStat] = field(default_factory=list)
+    sector_other_count: int = 0
     hhi: float = 0.0
     hhi_label: str = "low"
     countries: dict[str, int] = field(default_factory=dict)

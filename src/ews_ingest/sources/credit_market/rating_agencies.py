@@ -11,6 +11,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.registry import register_source
 
 __all__ = ["RatingAgencies"]
@@ -18,7 +19,10 @@ __all__ = ["RatingAgencies"]
 _AGENCIES: tuple[str, ...] = ("moodys", "sp", "fitch")
 
 
-@register_source("credit_market.rating_agencies")
+@register_source(
+    "credit_market.rating_agencies",
+    scope=Scope.MANIFEST,
+)
 class RatingAgencies:
     """Rating-agency press-release actions (stub — fragile scrape)."""
 

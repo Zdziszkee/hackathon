@@ -130,7 +130,13 @@ class HttpClient:
         headers: dict[str, str] | None = None,
     ) -> dict[str, object]:
         resp = self.request("GET", url, policy=policy, params=params, headers=headers)
-        data = resp.json()
+        try:
+            data = resp.json()
+        except ValueError:
+            # Some APIs (notably GDELT v2) return an HTML rate-limit/error body
+            # with HTTP 200 instead of JSON. Treat that as an empty dict so
+            # callers can degrade gracefully without a hard crash.
+            return {"_decode_error": "non-json", "_body_excerpt": resp.text[:200]}
         if not isinstance(data, dict):
             return {"_raw": data}
         return data
@@ -144,7 +150,12 @@ class HttpClient:
         headers: dict[str, str] | None = None,
     ) -> list[object]:
         resp = self.request("GET", url, policy=policy, params=params, headers=headers)
-        data = resp.json()
+        try:
+            data = resp.json()
+        except ValueError:
+            # Like :meth:`get_json`: tolerate a non-JSON error body (rate limit,
+            # HTML error page) by returning an empty list rather than crashing.
+            return []
         if isinstance(data, list):
             return data
         return [data]

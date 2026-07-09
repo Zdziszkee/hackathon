@@ -16,20 +16,41 @@
 # Roles are surfaced by SignalProvider modules via `SignalContext.source_for(role)`.
 
 roles:
-  macro.mfg_pmi: macro.ism_pmi
-  supply_chain.pressure: supply_chain.lead_time
-  supply_chain.new_orders: macro.ism_pmi
-  supply_chain.supplier_deliveries: macro.ism_pmi
+  # ISM Manufacturing PMI is now behind a Cloudflare/SSO paywall (verified:
+  # the URL 301-redirects to a login form). The headline series is NOT mirrored
+  # on FRED (NAPM/NAPMNO/NAPMSD all return "series does not exist"). Mark the
+  # role unbound so the macro_health indicator honestly reports ``unavailable``
+  # instead of misleading ``demo``.
+  macro.mfg_pmi: ~
+  # GSCPI daily CSV URL at NY Fed is dead (soft-404 HTML page). FRED does not
+  # mirror GSCPI either. The ISM sub-indices road through the same dead
+  # ISM-economics page. Mark unbound so supply_chain reports ``unavailable``.
+  supply_chain.pressure: ~
+  supply_chain.new_orders: ~
+  supply_chain.supplier_deliveries: ~
   credit.ohlcv: credit_market.yahoo
   credit.spreads: credit_market.fred_credit
   news.distress: news.gdelt
   sanctions: sanctions.opensanctions
   industry.sic: universe.sec_sic_codes
-  industry.naics: universe.naics_census
+  # naics_census connector currently fetches a navigation page (no <table>),
+  # and NAICS is only used as a corroboration flag — leave it unbound until a
+  # real structured file is wired. industry confidence is unaffected.
+  industry.naics: ~
   industry.filer_sic: company_financials.submissions
   financials.xbrl: company_financials.company_facts
   identity.country: identity.wikidata
-  demand.air: transport.bts_air_consumer
-  demand.truck: transport.ata_tonnage
+  # BTS air consumer Socrata resource 4x4 ``upne-bx7j`` is dead (404). BTS
+  # Monthly Transportation Statistics (crem-w557) works live but is a different
+  # dataset shape; wiring it well needs a small connector change. Until then
+  # leave demand.air unbound so the demand indicator reports ``unavailable``
+  # for airlines rather than showing a meaningless demo slope.
+  demand.air: ~
+  # ATA's trucking.org page is JS-rendered and the connector currently lands
+  # the homepage chrome (~5KB of nav HTML) — `_numeric_points` only reads
+  # structured observations now, so the ATA path yields no points. Pull the
+  # Truck Tonnage Index from FRED (`macro.fred_macro` Series TRUCKD11)
+  # instead: real, monthly, readily observable.
+  demand.truck: macro.fred_macro
   demand.freight_payments: transport.cass_freight
   demand.chem: commodity.eia

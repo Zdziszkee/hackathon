@@ -41,7 +41,6 @@ def test_registry_has_known_high_value_sources() -> None:
         "news.gdelt",
         "macro.fred_macro",
         "commodity.eia",
-        "identity.gleif_l1",
         "transport.fmcsa_census",
         "credit_market.yahoo",
     }

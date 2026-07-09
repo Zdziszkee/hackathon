@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 
@@ -14,7 +15,10 @@ __all__ = ["WorldbankPinksheet"]
 URL = "https://www.worldbank.org/content/dam/Worldbank/Indicators/Prices/Pink_Sheet/Pink_Data.xlsx"
 
 
-@register_source("commodity.worldbank_pinksheet")
+@register_source(
+    "commodity.worldbank_pinksheet",
+    scope=Scope.MANIFEST,
+)
 class WorldbankPinksheet:
     """Record the World Bank Pink Sheet bulk-file manifest (xlsx)."""
 

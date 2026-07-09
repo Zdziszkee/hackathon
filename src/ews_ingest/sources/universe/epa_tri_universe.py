@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import Identifiers, RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 from ews_ingest.providers import epa
@@ -37,7 +38,10 @@ def parse(rows: list[object]) -> list[RecordInput]:
     return out
 
 
-@register_source("universe.epa_tri_universe")
+@register_source(
+    "universe.epa_tri_universe",
+    scope=Scope.FACILITY,
+)
 class EpaTriUniverse:
     """Seed the petrochem facility universe from EPA TRI filtered to NAICS 325."""
 

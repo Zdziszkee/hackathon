@@ -12,6 +12,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 
@@ -21,7 +22,7 @@ PORTAL = "https://portwatch.imf.org"
 API_CANDIDATE = "https://portwatch.imf.org/api/dataset"
 
 
-@register_source("supply_chain.imf_port_watch")
+@register_source("supply_chain.imf_port_watch", scope=Scope.MANIFEST)
 class ImfPortWatch:
     """Record IMF Port Watch portal manifest (live endpoint to be verified)."""
 

@@ -37,13 +37,17 @@ class RawFormat(StrEnum):
 
 
 class Identifiers(BaseModel):
-    """Cross-source entity keys carried on every record for later joins."""
+    """Cross-source entity keys carried on every record for later joins.
+
+    Sector / industry are free-form strings stored under ``extra_ids`` and
+    populated dynamically (e.g. by :mod:`ews_ingest.dashboard.yahoo_sector`
+    at add time). No central vocabulary — see the architecture notes.
+    """
 
     model_config = ConfigDict(extra="ignore")
 
     cik: str | None = None
     ticker: str | None = None
-    lei: str | None = None
     usdot: str | None = None
     epa_frs_id: str | None = None
     name: str | None = None

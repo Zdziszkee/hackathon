@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawFormat, RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.records import RecordInput, build_record
 from ews_ingest.core.registry import register_source
 
@@ -16,7 +17,10 @@ URL = (
 )
 
 
-@register_source("sanctions.world_bank_debarred")
+@register_source(
+    "sanctions.world_bank_debarred",
+    scope=Scope.MANIFEST,
+)
 class WorldBankDebarred:
     """Record the World Bank debarred-firms file manifest."""
 

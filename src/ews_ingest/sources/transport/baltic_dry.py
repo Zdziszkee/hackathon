@@ -10,12 +10,16 @@ from collections.abc import Iterator
 
 from ews_ingest.core.context import FetchContext
 from ews_ingest.core.models import RawRecord, SourceType
+from ews_ingest.core.protocol import Scope
 from ews_ingest.core.registry import register_source
 
 __all__ = ["BalticDry"]
 
 
-@register_source("transport.baltic_dry")
+@register_source(
+    "transport.baltic_dry",
+    scope=Scope.MANIFEST,
+)
 class BalticDry:
     """Baltic Dry Index (stub — no free official source)."""
 
