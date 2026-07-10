@@ -350,14 +350,21 @@ details.pb-co-card[open] > summary .pb-co-toggle .pb-ico-minus{ display:inline-f
   min-height: 24px !important;
   line-height: 1 !important;
 }
-.pb-company {
+.pb-company > div[data-testid="stHorizontalBlock"] {
+  align-items: stretch;
   position: relative;
 }
-.pb-company > div[data-testid="stButton"] {
-  position: absolute;
-  top: 18px;
-  right: 18px;
+.pb-company > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child {
+  margin-left: -36px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding-top: 20px;
   z-index: 2;
+  position: relative;
+}
+.pb-company > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child > div[data-testid="stButton"] {
+  margin: 0;
 }
 
 /* Indicator rows */
