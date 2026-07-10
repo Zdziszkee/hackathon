@@ -86,9 +86,6 @@ _IND_ICON = {
     "ism": ic_line_chart,
 }
 
-# Grey tint for all indicator icon tiles
-_IC_TINT = "#9FA1A4"
-
 # ---------------------------------------------------------------------------
 # HSBC logo (base64-embedded for inline HTML)
 # ---------------------------------------------------------------------------
@@ -316,22 +313,24 @@ details.pb-co-card[open] > summary .pb-co-toggle .pb-ico-minus{ display:inline-f
 .pb-co-comp-lbl{ font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-500); font-weight:600; margin-top:3px; }
 
 /* Indicator rows */
-.pb-rows{ padding:0 12px 16px; }
+.pb-rows{ padding:8px 0 16px 48px; }
 details.pb-row{ padding:0; }
 details.pb-row > summary{ list-style:none; outline:none; }
 details.pb-row > summary::-webkit-details-marker{ display:none; }
 details.pb-row > summary::marker{ content:""; }
 .pb-row{
-  display:grid; grid-template-columns:1fr auto 110px 22px; align-items:center; gap:14px;
-  padding:12px; cursor:pointer;
+  display:grid; grid-template-columns:1fr auto 110px 22px; align-items:center; gap:16px;
+  padding:14px 16px 14px 24px; cursor:pointer;
 }
 .pb-row:hover{ background:var(--line-soft); border-radius:6px; }
-.pb-row-left{ display:flex; align-items:center; gap:12px; min-width:0; }
+.pb-row-left{ display:flex; align-items:center; gap:14px; min-width:0; }
 .pb-row-tile{
-  width:36px; height:36px; border-radius:6px; background:var(--tile-100);
+  width:40px; height:40px; border-radius:8px; background:var(--tile-100);
   display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  color:#6B7280;
 }
-.pb-row-label{ font-size:14px; font-weight:500; color:var(--ink-900); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pb-row-tile svg{ stroke:#6B7280; }
+.pb-row-label{ font-size:15px; font-weight:600; color:var(--ink-900); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .pb-row-val{ font-size:14px; font-weight:600; color:var(--ink-900); font-family:"JetBrains Mono",ui-monospace,monospace; }
 .pb-row-badge{
   display:inline-flex; align-items:center; gap:3px; border-radius:var(--radius-pill);
@@ -340,7 +339,7 @@ details.pb-row > summary::marker{ content:""; }
 .pb-row-right{ display:flex; align-items:center; gap:10px; justify-content:flex-end; }
 .pb-row-bar{ background:var(--line-200); height:5px; width:70px; border-radius:var(--radius-pill); overflow:hidden; }
 .pb-row-bar-fill{ height:5px; border-radius:var(--radius-pill); }
-.pb-row-num{ font-size:12px; font-weight:700; color:var(--ink-500); min-width:22px; text-align:right; font-family:"JetBrains Mono",ui-monospace,monospace; }
+.pb-row-num{ font-size:12px; font-weight:700; color:var(--ink-700); min-width:22px; text-align:right; font-family:"JetBrains Mono",ui-monospace,monospace; }
 /* Indicator row toggle: plus when collapsed, minus when expanded */
 .pb-row-toggle{ color:var(--ink-400); display:inline-flex; flex-shrink:0; }
 details.pb-row > summary .pb-row-toggle .pb-ico-plus{ display:inline-flex; }
@@ -348,7 +347,7 @@ details.pb-row > summary .pb-row-toggle .pb-ico-minus{ display:none; }
 details.pb-row[open] > summary .pb-row-toggle .pb-ico-plus{ display:none; }
 details.pb-row[open] > summary .pb-row-toggle .pb-ico-minus{ display:inline-flex; }
 
-.pb-row-detail{ padding:8px 12px 14px 60px; }
+.pb-row-detail{ padding:8px 16px 16px 24px; }
 .pb-row-desc{ font-size:13px; color:var(--ink-500); line-height:1.55; max-width:60ch; margin:8px 0 12px; }
 .pb-row-detail-grid{
   display:grid; grid-template-columns:max-content 1fr; gap:4px 16px;
@@ -959,8 +958,7 @@ def _row_html(
     fg = tok["fg"]
     status_ic = STATUS_ICON.get(result.status, ic_minus)(14)
     topic_ic_fn = _IND_ICON.get(indicator_id, ic_gauge)
-    topic_ic = topic_ic_fn(16)
-    tint = _IC_TINT
+    topic_ic = topic_ic_fn(20)
 
     badges = _status_badge(result.status)
     if result.status == "demo":
@@ -1012,7 +1010,7 @@ def _row_html(
     return (
         f'<details class="pb-row"><summary>'
         f'<span class="pb-row-left">'
-        f'<span class="pb-row-tile" style="color:{tint}">{topic_ic}</span>'
+        f'<span class="pb-row-tile">{topic_ic}</span>'
         f'<span class="pb-row-label">{_esc(label)}</span>'
         f"</span>"
         f"{mid}"
