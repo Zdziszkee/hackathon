@@ -4,8 +4,8 @@ Rebuilt from scratch: a single centered column, symmetric KPI strip, smooth
 spline chart with red gradient fill, transaction-style risk borrower list,
 and collapsible company detail cards. No sidebar, no right rail.
 
-Color: brand red (#DB0011) for bad, green (#29B32E) for good, yellow
-(#FFF34A) for warning. White cards on light grey, black ink, grey secondary
+Color: brand red (#DB0011) for bad, green (#29B32E) for good, yellow/orange
+(#F59E0B) for warning visuals. White cards on light grey, black ink, grey secondary
 text. Univers/Helvetica Neue/Arial. Radii are subtle (8px cards, round pills).
 Soft diffuse shadows.
 """
@@ -21,21 +21,21 @@ import streamlit as st
 from ews_ingest.dashboard.icons import (
     STATUS_ICON,
     ic_alert,
+    ic_bar_chart,
+    ic_boxes,
+    ic_building,
     ic_dollar,
     ic_file_text,
     ic_gauge,
-    ic_gavel,
+    ic_globe,
     ic_info,
-    ic_landmark,
     ic_line_chart,
-    ic_map_pin,
-    ic_message,
     ic_minus,
     ic_newspaper,
     ic_plus,
+    ic_scale,
     ic_shield,
-    ic_truck,
-    ic_zap,
+    ic_trending,
 )
 from ews_ingest.dashboard.signals.protocol import SignalResult
 from ews_ingest.dashboard.stats import PortfolioStats, SectorStat
@@ -43,46 +43,77 @@ from ews_ingest.dashboard.stats import PortfolioStats, SectorStat
 __all__ = [
     "inject_theme",
     "render_company_card",
+    "render_correlation_graph",
     "render_portfolio_overview",
     "render_topbar",
     "status_color",
 ]
 
 # ---------------------------------------------------------------------------
-# Status palette — green=good, yellow=warning, red=bad, grey=neutral
+# Status palette — green=good, yellow/orange=warning, red=bad, grey=neutral
 # ---------------------------------------------------------------------------
 
-_C_WARN = "#FFF34A"
-_C_WARN_FG = "#CA9A00"
+_C_WARN = "#F59E0B"
+_C_WARN_FG = "#B45309"
 
 _STATUS = {
-    "good": {"fg": "#29B32E", "bg": "rgba(41,179,46,0.10)", "bd": "rgba(41,179,46,0.22)"},
+    "good": {
+        "fg": "#29B32E",
+        "bg": "rgba(41,179,46,0.10)",
+        "bd": "rgba(41,179,46,0.22)",
+        "color": "#29B32E",
+    },
     "warning": {
         "fg": _C_WARN_FG,
-        "bg": "rgba(255,243,74,0.12)",
-        "bd": "rgba(255,243,74,0.30)",
+        "bg": "rgba(245,158,11,0.15)",
+        "bd": "rgba(245,158,11,0.30)",
+        "color": _C_WARN,
     },
-    "bad": {"fg": "#DB0011", "bg": "rgba(219,0,17,0.08)", "bd": "rgba(219,0,17,0.22)"},
-    "demo": {"fg": "#9FA1A4", "bg": "rgba(159,161,164,0.08)", "bd": "rgba(159,161,164,0.18)"},
+    "bad": {
+        "fg": "#DB0011",
+        "bg": "rgba(219,0,17,0.08)",
+        "bd": "rgba(219,0,17,0.22)",
+        "color": "#DB0011",
+    },
+    "demo": {
+        "fg": "#9FA1A4",
+        "bg": "rgba(159,161,164,0.08)",
+        "bd": "rgba(159,161,164,0.18)",
+        "color": "#9FA1A4",
+    },
     "unavailable": {
         "fg": "#C4C6C8",
         "bg": "rgba(196,198,200,0.06)",
         "bd": "rgba(196,198,200,0.16)",
+        "color": "#C4C6C8",
     },
 }
 
-# Indicator icons are all grey — no per-indicator color tinting.
+ACCENTS = {
+    "country": {"bg": "rgba(59,130,246,0.12)", "fg": "#3B82F6"},
+    "industry": {"bg": "rgba(139,92,246,0.12)", "fg": "#8B5CF6"},
+    "volatility": {"bg": "rgba(245,158,11,0.12)", "fg": "#F59E0B"},
+    "geopolitical": {"bg": "rgba(239,68,68,0.12)", "fg": "#EF4444"},
+    "general_demand": {"bg": "rgba(16,185,129,0.12)", "fg": "#10B981"},
+    "regulation": {"bg": "rgba(236,72,153,0.12)", "fg": "#EC4899"},
+    "supply_chain": {"bg": "rgba(14,165,233,0.12)", "fg": "#0EA5E9"},
+    "profitability": {"bg": "rgba(34,197,94,0.12)", "fg": "#22C55E"},
+    "macro_health": {"bg": "rgba(99,102,241,0.12)", "fg": "#6366F1"},
+    "news_sentiment": {"bg": "rgba(168,85,247,0.12)", "fg": "#A855F7"},
+    "ism": {"bg": "rgba(251,146,60,0.12)", "fg": "#FB923C"},
+}
+
 _IND_ICON = {
-    "country": ic_map_pin,
-    "industry": ic_landmark,
-    "volatility": ic_zap,
+    "country": ic_globe,
+    "industry": ic_building,
+    "volatility": ic_bar_chart,
     "geopolitical": ic_shield,
-    "general_demand": ic_line_chart,
-    "regulation": ic_gavel,
-    "supply_chain": ic_truck,
+    "general_demand": ic_trending,
+    "regulation": ic_scale,
+    "supply_chain": ic_boxes,
     "profitability": ic_dollar,
     "macro_health": ic_gauge,
-    "news_sentiment": ic_message,
+    "news_sentiment": ic_newspaper,
     "ism": ic_line_chart,
 }
 
@@ -109,7 +140,7 @@ _THEME_CSS = """
 <style>
 :root{
   --brand-red:#DB0011; --brand-red-dark:#B4000E; --brand-red-tint:rgba(219,0,17,.08);
-  --success:#29B32E; --warn:#FFF34A; --info:#2563EB;
+  --success:#29B32E; --warn:#F59E0B; --info:#2563EB;
   --ink-900:#1A1A1A; --ink-700:#333333; --ink-500:#9FA1A4; --ink-400:#BFC1C4;
   --line-200:#E6E6E6; --line-soft:#F0F0F0; --tile-100:#F7F7F7;
   --page-bg:#F5F5F5; --card-bg:#FFFFFF;
@@ -312,24 +343,40 @@ details.pb-co-card[open] > summary .pb-co-toggle .pb-ico-minus{ display:inline-f
 .pb-co-comp-num{ font-size:22px; font-weight:700; color:var(--ink-900); line-height:1; }
 .pb-co-comp-lbl{ font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-500); font-weight:600; margin-top:3px; }
 
+/* Embed refresh button next to company header */
+.stButton button[kind="secondary"] {
+  font-size: 11px !important;
+  padding: 1px 6px !important;
+  min-height: 24px !important;
+  line-height: 1 !important;
+}
+.pb-company {
+  position: relative;
+}
+.pb-company > div[data-testid="stButton"] {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 2;
+}
+
 /* Indicator rows */
 .pb-rows{ padding:8px 0 16px 48px; }
-details.pb-row{ padding:0; }
-details.pb-row > summary{ list-style:none; outline:none; }
-details.pb-row > summary::-webkit-details-marker{ display:none; }
-details.pb-row > summary::marker{ content:""; }
-.pb-row{
+details.pb-row{ padding:0; display:block; }
+details.pb-row > summary{
+  list-style:none; outline:none;
   display:grid; grid-template-columns:1fr auto 110px 22px; align-items:center; gap:16px;
   padding:14px 16px 14px 24px; cursor:pointer;
 }
-.pb-row:hover{ background:var(--line-soft); border-radius:6px; }
+details.pb-row > summary::-webkit-details-marker{ display:none; }
+details.pb-row > summary::marker{ content:""; }
+details.pb-row > summary:hover{ background:var(--line-soft); border-radius:6px; }
 .pb-row-left{ display:flex; align-items:center; gap:14px; min-width:0; }
 .pb-row-tile{
   width:40px; height:40px; border-radius:8px; background:var(--tile-100);
   display:flex; align-items:center; justify-content:center; flex-shrink:0;
-  color:#6B7280;
 }
-.pb-row-tile svg{ stroke:#6B7280; }
+.pb-row-tile svg{ fill:currentColor; }
 .pb-row-label{ font-size:15px; font-weight:600; color:var(--ink-900); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .pb-row-val{ font-size:14px; font-weight:600; color:var(--ink-900); font-family:"JetBrains Mono",ui-monospace,monospace; }
 .pb-row-badge{
@@ -347,7 +394,7 @@ details.pb-row > summary .pb-row-toggle .pb-ico-minus{ display:none; }
 details.pb-row[open] > summary .pb-row-toggle .pb-ico-plus{ display:none; }
 details.pb-row[open] > summary .pb-row-toggle .pb-ico-minus{ display:inline-flex; }
 
-.pb-row-detail{ padding:8px 16px 16px 24px; }
+.pb-row-detail{ padding:8px 16px 16px 24px; width:100%; box-sizing:border-box; }
 .pb-row-desc{ font-size:13px; color:var(--ink-500); line-height:1.55; max-width:60ch; margin:8px 0 12px; }
 .pb-row-detail-grid{
   display:grid; grid-template-columns:max-content 1fr; gap:4px 16px;
@@ -396,7 +443,8 @@ def inject_theme() -> None:
 
 
 def status_color(status: str) -> str:
-    return _STATUS.get(status, _STATUS["unavailable"])["fg"]
+    tok = _STATUS.get(status, _STATUS["unavailable"])
+    return tok.get("color", tok["fg"])
 
 
 def _token(status: str) -> dict[str, str]:
@@ -959,6 +1007,7 @@ def _row_html(
     status_ic = STATUS_ICON.get(result.status, ic_minus)(14)
     topic_ic_fn = _IND_ICON.get(indicator_id, ic_gauge)
     topic_ic = topic_ic_fn(20)
+    acc = ACCENTS.get(indicator_id, {"bg": "var(--tile-100)", "fg": "#6B7280"})
 
     badges = _status_badge(result.status)
     if result.status == "demo":
@@ -969,7 +1018,7 @@ def _row_html(
     if result.missing_env:
         badges += (
             '<span class="pb-row-badge" '
-            'style="background:rgba(255,243,74,.12);color:#CA9A00;border:1px solid rgba(255,243,74,.30);">key</span>'
+            'style="background:rgba(245,158,11,.15);color:#B45309;border:1px solid rgba(245,158,11,.30);">key</span>'
         )
 
     mid = f'<span><span class="pb-row-val">{_esc(result.value)}</span>{badges}</span>'
@@ -1010,15 +1059,15 @@ def _row_html(
     return (
         f'<details class="pb-row"><summary>'
         f'<span class="pb-row-left">'
-        f'<span class="pb-row-tile">{topic_ic}</span>'
+        f'<span class="pb-row-tile" style="background:{acc["bg"]};color:{acc["fg"]}">{topic_ic}</span>'
         f'<span class="pb-row-label">{_esc(label)}</span>'
         f"</span>"
         f"{mid}"
         f'<span class="pb-row-right">'
         f'<span style="color:{fg}">{status_ic}</span>'
         f"{bar}{num}"
+        f"</span>"
         f'<span class="pb-row-toggle"><span class="pb-ico-plus">{ic_plus(16)}</span><span class="pb-ico-minus">{ic_minus(16)}</span></span>'
-        "</span>"
         "</summary>"
         f'<div class="pb-row-detail">{detail_body}</div>'
         "</details>"
@@ -1076,3 +1125,19 @@ def render_company_card(
     </details>
     """
     st.markdown(html, unsafe_allow_html=True)
+
+
+def render_correlation_graph(
+    companies: list[tuple[str, float, str, str]],
+    _correlations: list[tuple[str, str, float]],
+) -> None:
+    if not companies:
+        return
+    chips = " ".join(
+        f'<span class="pb-chip">{_esc(n)} <small>{sc:.0f}</small></span>'
+        for n, sc, sec, st in companies[:8]
+    )
+    st.markdown(
+        f'<div style="margin:8px 0"><div class="pb-chips">{chips}</div></div>',
+        unsafe_allow_html=True,
+    )

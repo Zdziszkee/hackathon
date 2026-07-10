@@ -22,7 +22,6 @@ from ews_ingest.dashboard.demo import DemoValues
 from ews_ingest.dashboard.signals import (
     SignalContext,
     SignalResult,
-    cast_status,
     demo_result,
     ok_result,
     register_provider,
@@ -64,18 +63,17 @@ def _zscore(series: list[float]) -> float | None:
 
 
 def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
-    source_ids = tuple(filter(None, (ctx.source_for(r) for r in ROLES)))
-    if not source_ids:
-        return SignalResult(
-            value="n/a",
-            score=0.0,
-            status=cast_status("unavailable"),
-            detail={},
-            source_ids=(),
-            note="No supply-chain source bound for this region.",
-        )
     seed = company.name or company.ticker or company.cik or "company"
     demo = DemoValues.for_company(seed)
+    source_ids = tuple(filter(None, (ctx.source_for(r) for r in ROLES)))
+    if not source_ids:
+        return demo_result(
+            label_hint="supply_chain",
+            value=f"GSCPI {demo.gscpi():+.2f}",
+            score=50.0 + demo.gscpi() * 20.0,
+            source_ids=(),
+            note="No supply-chain source bound — showing demo.",
+        )
 
     gscpi_sid = ctx.source_for("supply_chain.pressure")
     pmi_sid = ctx.source_for("supply_chain.new_orders")

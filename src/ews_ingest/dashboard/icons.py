@@ -1,8 +1,8 @@
-"""Lucide-style stroke icons (inline SVG, currentColor).
+"""Carbon Design System icons (inline SVG, currentColor).
 
-Lucide icons use a 24x24 viewBox, no fill, stroke=currentColor, stroke-width=2,
-round caps/joins. Each helper returns an inline-SVG string sized via ``size``
-(px). Color inherits from the surrounding element via ``color``.
+Carbon icons use a 32x32 viewBox, fill=currentColor.
+Each helper returns an inline-SVG string sized via ``size`` (px).
+Color inherits from the surrounding element via ``color``.
 """
 
 from __future__ import annotations
@@ -106,63 +106,31 @@ def ic_plus(size: int = 16) -> str:
 
 
 def ic_building(size: int = 16) -> str:
-    return Icon(
-        size,
-        '<rect width="16" height="20" x="4" y="2" rx="2"/>'
-        '<path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/>'
-        '<path d="M12 6h.01"/><path d="M12 10h.01"/><path d="M12 14h.01"/>'
-        '<path d="M16 10h.01"/><path d="M16 14h.01"/><path d="M8 10h.01"/>'
-        '<path d="M8 14h.01"/>',
-    )
+    return f'<svg viewBox="0 0 32 32" fill="currentColor" width="{size}" height="{size}" style="flex-shrink:0"><path d="M28,2H16a2.002,2.002,0,0,0-2,2V14H4a2.002,2.002,0,0,0-2,2V30H30V4A2.0023,2.0023,0,0,0,28,2ZM9,28V21h4v7Zm19,0H15V20a1,1,0,0,0-1-1H8a1,1,0,0,0-1,1v8H4V16H16V4H28Z"/><path d="M18 8H20V10H18z"/><path d="M24 8H26V10H24z"/><path d="M18 14H20V16H18z"/><path d="M24 14H26V16H24z"/><path d="M18 20H20V22H18z"/><path d="M24 20H26V22H24z"/></svg>'
 
 
 def ic_shield(size: int = 16) -> str:
-    return Icon(
-        size,
-        '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
-    )
+    return f'<svg viewBox="0 0 32 32" fill="currentColor" width="{size}" height="{size}" style="flex-shrink:0"><path d="M14 16.59 11.41 14 10 15.41 14 19.41 22 11.41 20.59 10 14 16.59z"/><path d="M16,30,9.8242,26.7071A10.9818,10.9818,0,0,1,4,17V4A2.0021,2.0021,0,0,1,6,2H26a2.0021,2.0021,0,0,1,2,2V17a10.9818,10.9818,0,0,1-5.8242,9.7071ZM6,4V17a8.9852,8.9852,0,0,0,4.7656,7.9423L16,27.7333l5.2344-2.791A8.9852,8.9852,0,0,0,26,17V4Z"/></svg>'
 
 
 def ic_trending(size: int = 16) -> str:
-    return Icon(
-        size,
-        '<path d="M22 7 8.5 20.5 5 17"/>'
-        '<path d="m21 5-9 9-2-2"/>'
-        '<path d="M3 21h18"/><path d="M3 3v18"/>',
-    )
+    return f'<svg viewBox="0 0 32 32" fill="currentColor" width="{size}" height="{size}" style="flex-shrink:0"><path d="M4.67,28l6.39-12,7.3,6.49a2,2,0,0,0,1.7.47,2,2,0,0,0,1.42-1.07L27,10.9,25.18,10,19.69,21l-7.3-6.49A2,2,0,0,0,10.71,14a2,2,0,0,0-1.42,1L4,25V2H2V28a2,2,0,0,0,2,2H30V28Z"/></svg>'
 
 
 def ic_newspaper(size: int = 16) -> str:
-    return Icon(
-        size,
-        '<path d="M15 18h1a1 1 0 0 0 1-1v-3h1a2 2 0 0 0 0-4h-1v-3a1 1 0 0 0-1-1h-7l-4 4v9a1 1 0 0 0 1 1"/>'
-        '<path d="M3 27h2"/>',
-    )
+    return f'<svg viewBox="0 0 32 32" fill="currentColor" width="{size}" height="{size}" style="flex-shrink:0"><path d="M25.7,9.3l-7-7C18.5,2.1,18.3,2,18,2H8C6.9,2,6,2.9,6,4v24c0,1.1,0.9,2,2,2h16c1.1,0,2-0.9,2-2V10C26,9.7,25.9,9.5,25.7,9.3	z M18,4.4l5.6,5.6H18V4.4z M24,28H8V4h8v6c0,1.1,0.9,2,2,2h6V28z"/><path d="M10 22H22V24H10z"/><path d="M10 16H22V18H10z"/></svg>'
 
 
 def ic_scale(size: int = 16) -> str:
-    return Icon(
-        size,
-        '<path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/>'
-        '<path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/>'
-        '<path d="M7 21h10"/><path d="m12 3 3 3h-3"/><path d="M12 21V6"/>',
-    )
+    return f'<svg viewBox="0 0 32 32" fill="currentColor" width="{size}" height="{size}" style="flex-shrink:0"><path d="M13,17H7a2,2,0,0,0-2,2v6a2,2,0,0,0,2,2h6a2,2,0,0,0,2-2V19A2,2,0,0,0,13,17ZM7,25V19h6v6Z"/><path d="M19,21v2h6a2,2,0,0,0,2-2V7a2,2,0,0,0-2-2H11A2,2,0,0,0,9,7v6h2V7H25V21"/></svg>'
 
 
 def ic_boxes(size: int = 16) -> str:
-    return Icon(
-        size,
-        '<path d="M2.97 12.92A2 2 0 0 0 2 14.63a32 32 0 0 0 4 13.18 2 2 0 0 0 1.76 1.06c3.84 0 7.4-.67 10.49-1.46a2 2 0 0 0 1.43-1.4c.34-1.18.59-2.42.59-3.64a32 32 0 0 0-4-13.18 2 2 0 0 0-2.32-1.41"/><rect width="20" height="12" x="2" y="6" rx="2"/>',
-    )
+    return f'<svg viewBox="0 0 32 32" fill="currentColor" width="{size}" height="{size}" style="flex-shrink:0"><path d="M26,30H6a2,2,0,0,1-2-2V16a2,2,0,0,1,2-2H9v2H6V28H26V16H23V14h3a2,2,0,0,1,2,2V28A2,2,0,0,1,26,30Z"/><path d="M13 20H19V22H13z"/><path d="M20.59 8.59 17 12.17 17 2 15 2 15 12.17 11.41 8.59 10 10 16 16 22 10 20.59 8.59z"/></svg>'
 
 
 def ic_bar_chart(size: int = 16) -> str:
-    return Icon(
-        size,
-        '<line x1="12" x2="12" y1="20" y2="10"/>'
-        '<line x1="18" x2="18" y1="20" y2="4"/>'
-        '<line x1="6" x2="6" y1="20" y2="16"/>',
-    )
+    return f'<svg viewBox="0 0 32 32" fill="currentColor" width="{size}" height="{size}" style="flex-shrink:0"><path d="M4,2H2V28a2,2,0,0,0,2,2H30V28H4V25H26V17H4V13H18V5H4ZM24,19v4H4V19ZM16,7v4H4V7Z"/></svg>'
 
 
 def ic_activity(size: int = 16) -> str:
@@ -204,26 +172,15 @@ def ic_search(size: int = 16) -> str:
 
 
 def ic_gauge(size: int = 16) -> str:
-    return Icon(
-        size,
-        '<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
-    )
+    return f'<svg viewBox="0 0 32 32" fill="currentColor" width="{size}" height="{size}" style="flex-shrink:0"><path d="M24 21H26V26H24z"/><path d="M20 16H22V26H20z"/><path d="M11,26a5.0059,5.0059,0,0,1-5-5H8a3,3,0,1,0,3-3V16a5,5,0,0,1,0,10Z"/><path d="M28,2H4A2.002,2.002,0,0,0,2,4V28a2.0023,2.0023,0,0,0,2,2H28a2.0027,2.0027,0,0,0,2-2V4A2.0023,2.0023,0,0,0,28,2Zm0,9H14V4H28ZM12,4v7H4V4ZM4,28V13H28.0007l.0013,15Z"/></svg>'
 
 
 def ic_globe(size: int = 16) -> str:
-    return Icon(
-        size,
-        '<circle cx="12" cy="12" r="10"/>'
-        '<path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>'
-        '<path d="M2 12h20"/>',
-    )
+    return f'<svg viewBox="0 0 32 32" fill="currentColor" width="{size}" height="{size}" style="flex-shrink:0"><path d="M14,4a7,7,0,1,1-7,7,7,7,0,0,1,7-7m0-2a9,9,0,1,0,9,9A9,9,0,0,0,14,2Z"/><path d="M28,11a13.9563,13.9563,0,0,0-4.1051-9.8949L22.4813,2.5187A11.9944,11.9944,0,0,1,5.5568,19.5194l-.0381-.0381L4.1051,20.8949A13.9563,13.9563,0,0,0,14,25v3H10v2H20V28H16V24.84A14.0094,14.0094,0,0,0,28,11Z"/></svg>'
 
 
 def ic_dollar(size: int = 16) -> str:
-    return Icon(
-        size,
-        '<line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
-    )
+    return f'<svg viewBox="0 0 32 32" fill="currentColor" width="{size}" height="{size}" style="flex-shrink:0"><path d="M21,12V10H17V7H15v3H13a2.002,2.002,0,0,0-2,2v3a2.002,2.002,0,0,0,2,2h6v3H11v2h4v3h2V22h2a2.0023,2.0023,0,0,0,2-2V17a2.002,2.002,0,0,0-2-2H13V12Z"/><path d="M16,4A12,12,0,1,1,4,16,12.0353,12.0353,0,0,1,16,4m0-2A14,14,0,1,0,30,16,14.0412,14.0412,0,0,0,16,2Z"/></svg>'
 
 
 def ic_gavel(size: int = 16) -> str:
@@ -249,10 +206,7 @@ def ic_landmark(size: int = 16) -> str:
 
 
 def ic_line_chart(size: int = 16) -> str:
-    return Icon(
-        size,
-        '<path d="M3 3v18h18"/><path d="M7 14l3-3 3 3 5-5"/><path d="M18 9h2v2"/>',
-    )
+    return f'<svg viewBox="0 0 32 32" fill="currentColor" width="{size}" height="{size}" style="flex-shrink:0"><path d="M4.67,28l6.39-12,7.3,6.49a2,2,0,0,0,1.7.47,2,2,0,0,0,1.42-1.07L27,10.9,25.18,10,19.69,21l-7.3-6.49A2,2,0,0,0,10.71,14a2,2,0,0,0-1.42,1L4,25V2H2V28a2,2,0,0,0,2,2H30V28Z"/></svg>'
 
 
 def ic_message(size: int = 16) -> str:

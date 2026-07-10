@@ -56,18 +56,17 @@ def _sic_info_from_submissions(
 
 
 def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
-    source_ids = tuple(filter(None, (ctx.source_for(r) for r in ROLES)))
-    if not source_ids:
-        return SignalResult(
-            value="n/a",
-            score=0.0,
-            status=cast_status("unavailable"),
-            detail={},
-            source_ids=(),
-            note="No industry sources bound for this region.",
-        )
     seed = company.name or company.ticker or company.cik or "company"
     demo = DemoValues.for_company(seed)
+    source_ids = tuple(filter(None, (ctx.source_for(r) for r in ROLES)))
+    if not source_ids:
+        return demo_result(
+            label_hint="industry",
+            value=demo.industry(),
+            score=demo.industry_confidence(),
+            source_ids=(),
+            note="No industry sources bound — showing demo.",
+        )
 
     sic_map_sid = ctx.source_for("industry.sic")
     filer_sid = ctx.source_for("industry.filer_sic")

@@ -11,7 +11,6 @@ from ews_ingest.dashboard.demo import DemoValues
 from ews_ingest.dashboard.signals import (
     SignalContext,
     SignalResult,
-    cast_status,
     demo_result,
     ok_result,
     register_provider,
@@ -24,18 +23,17 @@ ROLE = "macro.mfg_pmi"
 
 
 def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
-    source_id = ctx.source_for(ROLE)
-    if source_id is None:
-        return SignalResult(
-            value="n/a",
-            score=0.0,
-            status=cast_status("unavailable"),
-            detail={},
-            source_ids=(),
-            note="No PMI source bound for this region.",
-        )
     seed = company.name or company.ticker or company.cik or "company"
     demo = DemoValues.for_company(seed)
+    source_id = ctx.source_for(ROLE)
+    if source_id is None:
+        return demo_result(
+            label_hint="macro_health",
+            value=f"{demo.pmi()}",
+            score=abs(50.0 - demo.pmi()) * 5.0,
+            source_ids=(),
+            note="No PMI source bound — showing demo.",
+        )
     if missing := ctx.missing_env(source_id):
         return demo_result(
             label_hint="macro_health",

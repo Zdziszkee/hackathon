@@ -77,18 +77,17 @@ def _slope(points: list[float]) -> float | None:
 
 
 def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
-    source_id = ctx.source_for(ROLE)
-    if source_id is None:
-        return SignalResult(
-            value="n/a",
-            score=0.0,
-            status=cast_status("unavailable"),
-            detail={},
-            source_ids=(),
-            note=f"No source bound for role {ROLE!r}.",
-        )
     seed = company.name or company.ticker or company.cik or "company"
     demo = DemoValues.for_company(seed)
+    source_id = ctx.source_for(ROLE)
+    if source_id is None:
+        return demo_result(
+            label_hint="general_demand",
+            value=f"{demo.demand_trend():+.2f}",
+            score=50.0,
+            source_ids=(),
+            note="No source bound — showing demo.",
+        )
 
     missing_env: list[str] = []
     if miss := ctx.missing_env(source_id):

@@ -503,6 +503,39 @@ def _bust_onboarding_session() -> None:
     st.session_state.pop(_SESSION_TASKS_KEY, None)
 
 
+def _render_correlation_graph(
+    computed: list[tuple[Company, list[tuple[SignalProvider, SignalResult]], float, int]],
+) -> None:
+    """Build placeholder company-correlation data and render the graph.
+
+    Companies become nodes (colored by risk status). Correlation edges are
+    derived from shared sector (strong) and proximity of composite score
+    (moderate). This is a placeholder — swap with real causality data later.
+    """
+    companies_graph: list[tuple[str, float, str, str]] = []
+    for co, _res, composite, _flags in computed:
+        status = _composite_status(composite)
+        companies_graph.append((co.name, composite, co.sector or "Unknown", status))
+
+    # Placeholder correlations: same-sector pairs get high strength,
+    # score-proximity (< 10 apart) gets moderate. Cap at ~30 edges.
+    correlations: list[tuple[str, str, float]] = []
+    n = len(companies_graph)
+    for i in range(n):
+        for j in range(i + 1, n):
+            name_i, score_i, sec_i, _ = companies_graph[i]
+            name_j, score_j, sec_j, _ = companies_graph[j]
+            if sec_i == sec_j and sec_i != "Unknown":
+                correlations.append((name_i, name_j, 0.75))
+            elif abs(score_i - score_j) < 10:
+                correlations.append((name_i, name_j, 0.35))
+    correlations = correlations[:30]
+
+    from ews_ingest.dashboard.ui import render_correlation_graph
+
+    render_correlation_graph(companies_graph, correlations)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -529,9 +562,6 @@ def main() -> None:
     # --- Single centered column: no sidebar, no right rail ---
     render_topbar(len(companies))
 
-    # --- Add-company form ---
-    _render_add_company_form(store, suggest)
-
     # --- Onboarding status panels (one per in-flight task) ---
     any_running = _render_onboarding_panels()
 
@@ -557,8 +587,20 @@ def main() -> None:
 
     # --- Portfolio overview panel ---
     stats = _portfolio_stats(computed)
+
+    # --- Company correlation graph (placeholder hardcoded data) ---
+    _render_correlation_graph(computed)
+
     render_portfolio_overview(stats)
     st.divider()
+
+    # --- Add-company form (search bar at top of companies section) ---
+    st.markdown(
+        '<div class="pb-section-title">Companies'
+        '<span class="pb-section-sub">add a ticker to monitor</span></div>',
+        unsafe_allow_html=True,
+    )
+    _render_add_company_form(store, suggest)
 
     # --- Company cards, sorted by composite risk descending ---
     computed.sort(key=lambda x: -x[2])
@@ -569,30 +611,29 @@ def main() -> None:
         is_refreshing = in_flight.get(ticker) is not None and (
             in_flight[ticker].status == "running"
         )
-        refresh_cols = st.columns([8, 1])
-        with refresh_cols[1]:
-            if st.button(
-                "↻ Refresh",
-                key=f"ews_refresh_{ticker}",
-                disabled=is_refreshing,
-                help=(
-                    "Re-fetch every eligible source for this company."
-                    if not is_refreshing
-                    else "A refresh is already in progress."
-                ),
-            ):
-                _schedule_onboarding(company.identifiers)
-                st.rerun()
-        with refresh_cols[0]:
-            render_company_card(
-                company.name,
-                company.sector,
-                company.ticker,
-                composite,
-                comp_status,
-                ((p.indicator_id, p.label, p.description, r) for p, r in results),
-                _collect_sources(results),
-            )
+        st.markdown('<div class="pb-company">', unsafe_allow_html=True)
+        if st.button(
+            "↻",
+            key=f"ews_refresh_{ticker}",
+            disabled=is_refreshing,
+            help=(
+                "Re-fetch every eligible source for this company."
+                if not is_refreshing
+                else "A refresh is already in progress."
+            ),
+        ):
+            _schedule_onboarding(company.identifiers)
+            st.rerun()
+        render_company_card(
+            company.name,
+            company.sector,
+            company.ticker,
+            composite,
+            comp_status,
+            ((p.indicator_id, p.label, p.description, r) for p, r in results),
+            _collect_sources(results),
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # --- Methodology ---
     with st.expander("Methodology", expanded=False):
@@ -647,7 +688,7 @@ def _render_add_company_form(store: CompanyStore, suggest: TickerSuggest) -> Non
     selectbox below the input) fills the field. The Add / Remove buttons
     are unchanged.
     """
-    cols = st.columns([3, 1, 8])
+    cols = st.columns([4, 1, 1, 6])
     with cols[0]:
         new_ticker = st.text_input(
             "Add company",
@@ -663,16 +704,16 @@ def _render_add_company_form(store: CompanyStore, suggest: TickerSuggest) -> Non
             key="ews_add_company_submit",
         )
     with cols[2]:
-        # Right-hand slot is informational only — keeps the form on one row.
         removed = st.button(
             "Remove",
-            use_container_width=False,
+            type="secondary",
+            use_container_width=True,
             key="ews_remove_company_btn",
             help="Remove the currently-typed ticker from the portfolio.",
         )
 
-    # Autocomplete: surface the top 5 matches as a clickable selectbox that
-    # pre-fills the text input via session state. We catch and ignore any
+    # Autocomplete: surface the top 5 matches as a selectbox that
+    # pre-fills the text input. We catch and ignore any
     # failure from the live SEC lookup so the form keeps working offline.
     matches: list[Identifiers] = []
     if new_ticker and new_ticker.strip():
@@ -683,7 +724,19 @@ def _render_add_company_form(store: CompanyStore, suggest: TickerSuggest) -> Non
             matches = []
         if matches:
             options = [f"{m.ticker} — {m.name}" if m.name else (m.ticker or "?") for m in matches]
-            st.caption("Suggestions: " + " · ".join(options))
+            sel = st.selectbox(
+                "Select suggestion to fill",
+                options,
+                index=None,
+                placeholder="Select to auto-fill ticker field",
+                label_visibility="collapsed",
+                key="ticker_suggestion",
+            )
+            if sel:
+                tkr = sel.split(" — ")[0].strip()
+                if st.session_state.get("ews_add_company_ticker") != tkr:
+                    st.session_state["ews_add_company_ticker"] = tkr
+                    st.rerun()
 
     if submitted:
         ticker = (new_ticker or "").strip()
