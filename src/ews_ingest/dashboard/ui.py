@@ -21,7 +21,6 @@ import streamlit as st
 from ews_ingest.dashboard.icons import (
     STATUS_ICON,
     ic_alert,
-    ic_chevron_down,
     ic_dollar,
     ic_file_text,
     ic_gauge,
@@ -33,6 +32,7 @@ from ews_ingest.dashboard.icons import (
     ic_message,
     ic_minus,
     ic_newspaper,
+    ic_plus,
     ic_shield,
     ic_truck,
     ic_zap,
@@ -296,8 +296,12 @@ details.pb-co-card > summary::-webkit-details-marker{ display:none; }
 details.pb-co-card > summary::marker{ content:""; }
 details.pb-co-card > summary:hover{ background:var(--line-soft); }
 details.pb-co-card[open] > summary{ border-bottom:1px solid var(--line-soft); }
-.pb-co-chev{ color:var(--ink-400); transition:transform .15s ease; display:inline-flex; flex-shrink:0; margin-left:8px; }
-details.pb-co-card[open] > summary .pb-co-chev{ transform:rotate(180deg); }
+/* Company card toggle: plus when collapsed, minus when expanded */
+.pb-co-toggle{ color:var(--ink-400); display:inline-flex; flex-shrink:0; margin-left:8px; }
+details.pb-co-card > summary .pb-co-toggle .pb-ico-plus{ display:inline-flex; }
+details.pb-co-card > summary .pb-co-toggle .pb-ico-minus{ display:none; }
+details.pb-co-card[open] > summary .pb-co-toggle .pb-ico-plus{ display:none; }
+details.pb-co-card[open] > summary .pb-co-toggle .pb-ico-minus{ display:inline-flex; }
 .pb-co-score{
   width:48px; height:48px; border-radius:6px;
   display:flex; align-items:center; justify-content:center;
@@ -337,8 +341,12 @@ details.pb-row > summary::marker{ content:""; }
 .pb-row-bar{ background:var(--line-200); height:5px; width:70px; border-radius:var(--radius-pill); overflow:hidden; }
 .pb-row-bar-fill{ height:5px; border-radius:var(--radius-pill); }
 .pb-row-num{ font-size:12px; font-weight:700; color:var(--ink-500); min-width:22px; text-align:right; font-family:"JetBrains Mono",ui-monospace,monospace; }
-.pb-row-chev{ color:var(--ink-400); transition:transform .15s ease; display:inline-flex; }
-details.pb-row[open] > summary .pb-row-chev{ transform:rotate(180deg); }
+/* Indicator row toggle: plus when collapsed, minus when expanded */
+.pb-row-toggle{ color:var(--ink-400); display:inline-flex; flex-shrink:0; }
+details.pb-row > summary .pb-row-toggle .pb-ico-plus{ display:inline-flex; }
+details.pb-row > summary .pb-row-toggle .pb-ico-minus{ display:none; }
+details.pb-row[open] > summary .pb-row-toggle .pb-ico-plus{ display:none; }
+details.pb-row[open] > summary .pb-row-toggle .pb-ico-minus{ display:inline-flex; }
 
 .pb-row-detail{ padding:8px 12px 14px 60px; }
 .pb-row-desc{ font-size:13px; color:var(--ink-500); line-height:1.55; max-width:60ch; margin:8px 0 12px; }
@@ -1011,7 +1019,7 @@ def _row_html(
         f'<span class="pb-row-right">'
         f'<span style="color:{fg}">{status_ic}</span>'
         f"{bar}{num}"
-        f'<span class="pb-row-chev">{ic_chevron_down(16)}</span>'
+        f'<span class="pb-row-toggle"><span class="pb-ico-plus">{ic_plus(16)}</span><span class="pb-ico-minus">{ic_minus(16)}</span></span>'
         "</span>"
         "</summary>"
         f'<div class="pb-row-detail">{detail_body}</div>'
@@ -1063,7 +1071,7 @@ def render_company_card(
           <div class="pb-co-comp-num" style="color:{fg}">{composite:.0f}</div>
           <div class="pb-co-comp-lbl">composite / 100</div>
         </div>
-        <span class="pb-co-chev">{ic_chevron_down(20)}</span>
+        <span class="pb-co-toggle"><span class="pb-ico-plus">{ic_plus(18)}</span><span class="pb-ico-minus">{ic_minus(18)}</span></span>
       </summary>
       <div class="pb-rows">{body_rows}</div>
       {src_html}

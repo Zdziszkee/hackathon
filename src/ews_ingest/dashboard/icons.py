@@ -31,6 +31,7 @@ __all__ = [
     "ic_message",
     "ic_minus",
     "ic_newspaper",
+    "ic_plus",
     "ic_scale",
     "ic_search",
     "ic_shield",
@@ -94,6 +95,13 @@ def ic_minus(size: int = 16) -> str:
     return Icon(
         size,
         '<circle cx="12" cy="12" r="10"/><path d="M8 12h8"/>',
+    )
+
+
+def ic_plus(size: int = 16) -> str:
+    return Icon(
+        size,
+        '<circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/>',
     )
 
 
