@@ -332,13 +332,15 @@ def main() -> None:
 
 
 def _render_company_cards(computed: list[CompanyResult]) -> None:
-    """Render the sorted list of company cards, each with a per-card Refresh button."""
-    from ews_ingest.dashboard.ui import (
-        render_company_card,  # local import: keep main() import-light
-    )
+    from ews_ingest.dashboard.ui import render_company_card
 
     sorted_results = sorted(computed, key=lambda x: -x[2])
     in_flight = _ensure_session_tasks()
+    focus_ticker = st.session_state.pop("focus_company", None)
+    scroll_key = f"scroll_done_{focus_ticker}" if focus_ticker else None
+    if focus_ticker and scroll_key:
+        st.session_state.setdefault(scroll_key, False)
+
     for company, results, composite, _flags in sorted_results:
         comp_status = _composite_status(composite)
         ticker = (company.ticker or "").upper()
@@ -359,7 +361,6 @@ def _render_company_cards(computed: list[CompanyResult]) -> None:
                 anchor_id=ticker,
             )
         with btn_col:
-            # ``on_click`` fires before the rerun — no explicit ``st.rerun()`` needed.
             st.button(
                 "↻",
                 key=f"ews_refresh_{ticker}",
@@ -373,6 +374,22 @@ def _render_company_cards(computed: list[CompanyResult]) -> None:
                 args=(company.identifiers,),
             )
         st.markdown("</div>", unsafe_allow_html=True)
+
+    if focus_ticker and scroll_key and not st.session_state.get(scroll_key):
+        import streamlit.components.v1 as _st_v1
+
+        _st_v1.html(_focus_scroll_js(focus_ticker), height=0)
+        st.session_state[scroll_key] = True
+
+
+def _focus_scroll_js(ticker: str) -> str:
+    safe = ticker.replace('"', "").replace("'", "")
+    return (
+        "<script>(function(){"
+        f"const el=document.getElementById('pb-co-{safe}');"
+        "if(el){el.open=true;el.scrollIntoView({behavior:'smooth',block:'start'});}"
+        "})();</script>"
+    )
 
 
 def _render_add_company_form(store: CompanyStore, suggest: TickerSuggest) -> None:
