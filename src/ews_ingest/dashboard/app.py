@@ -215,34 +215,32 @@ def _collect_sources(
 
 
 def _render_correlation_graph(computed: list[CompanyResult]) -> None:
-    """Build placeholder company-correlation data and render the graph.
+    from ews_ingest.dashboard.graph import CompanyGraph, build_correlation_edges
+    from ews_ingest.dashboard.ui import (
+        render_correlation_graph,
+        render_graph_jump_button,
+    )
 
-    Companies become nodes (colored by risk status). Correlation edges are
-    derived from shared sector (strong) and proximity of composite score
-    (moderate). This is a placeholder — swap with real causality data later.
-    """
-    from ews_ingest.dashboard.ui import render_correlation_graph  # local import: avoid cycle
-
-    companies_graph: list[tuple[str, float, str, str]] = [
-        (co.name, composite, co.sector or "Unknown", _composite_status(composite))
+    companies_graph: list[CompanyGraph] = [
+        CompanyGraph(
+            name=co.name,
+            score=composite,
+            sector=co.sector or "Unknown",
+            status=_composite_status(composite),
+            ticker=(co.ticker or co.name).upper(),
+        )
         for co, _res, composite, _flags in computed
     ]
+    edges = build_correlation_edges(companies_graph)
 
-    # Placeholder correlations: same-sector pairs get high strength,
-    # score-proximity (< 10 apart) gets moderate. Cap at ~30 edges.
-    correlations: list[tuple[str, str, float]] = []
-    n = len(companies_graph)
-    for i in range(n):
-        for j in range(i + 1, n):
-            name_i, score_i, sec_i, _ = companies_graph[i]
-            name_j, score_j, sec_j, _ = companies_graph[j]
-            if sec_i == sec_j and sec_i != "Unknown":
-                correlations.append((name_i, name_j, 0.75))
-            elif abs(score_i - score_j) < 10:
-                correlations.append((name_i, name_j, 0.35))
-    correlations = correlations[:30]
-
-    render_correlation_graph(companies_graph, correlations)
+    returned = render_correlation_graph(companies_graph, edges)
+    st.session_state["graph_selected"] = (
+        returned[0][0].get("id") if returned and returned[0] else None
+    )
+    focus = render_graph_jump_button(st.session_state.get("graph_selected"))
+    if focus:
+        st.session_state["focus_company"] = focus
+        st.rerun()
 
 
 # ---------------------------------------------------------------------------
