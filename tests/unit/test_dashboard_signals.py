@@ -7,6 +7,7 @@ zone is empty; asserts the ISM page-text parser and GSCPI CSV parser.
 
 from __future__ import annotations
 
+import json
 import math
 import uuid
 from datetime import UTC, datetime
@@ -99,11 +100,28 @@ def test_list_providers_discovers_all_indicators() -> None:
     assert not missing
 
 
-def test_load_companies_reads_universe() -> None:
-    companies = load_companies(CONFIG / "entities.yaml")
-    assert companies, "entities.yaml should seed companies"
-    assert any(c.identifiers.ticker == "UPS" for c in companies)
-    assert all(c.sector for c in companies)
+def test_load_companies_is_empty_without_json(tmp_path: Path) -> None:
+    # no json, no yaml (hardcoded removed)
+    path = tmp_path / "companies.json"
+    companies = load_companies(path)
+    assert companies == []
+
+
+def test_load_companies_reads_from_json(tmp_path: Path) -> None:
+    path = tmp_path / "companies.json"
+    data = [
+        {
+            "ticker": "UPS",
+            "name": "United Parcel Service",
+            "cik": "0001090727",
+            "extra_ids": {"sector": "transport_logistics"},
+        }
+    ]
+    path.write_text(json.dumps(data))
+    companies = load_companies(path)
+    assert len(companies) == 1
+    assert companies[0].identifiers.ticker == "UPS"
+    assert companies[0].sector == "transport_logistics"
 
 
 def test_bindings_resolve_roles() -> None:

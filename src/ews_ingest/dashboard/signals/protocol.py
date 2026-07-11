@@ -25,9 +25,11 @@ from typing import Literal, Protocol, runtime_checkable
 
 from ews_ingest.core.models import Identifiers
 from ews_ingest.dashboard.bindings import IndicatorBindings
+from ews_ingest.dashboard.db import HistoricalStore
 from ews_ingest.dashboard.landing import LandingReader
 
 __all__ = [
+    "HistoricalStore",
     "IndicatorBindings",
     "LandingReader",
     "SignalContext",
@@ -64,6 +66,7 @@ class SignalContext:
     landing: LandingReader
     env_present: Callable[[str], bool]
     missing_env: Callable[[str], list[str]]
+    historical: HistoricalStore | None = None
 
     def source_for(self, role: str) -> str | None:
         """Resolve a role to a concrete source_id (portfolio-wide)."""

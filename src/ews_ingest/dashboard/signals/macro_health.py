@@ -14,6 +14,7 @@ from ews_ingest.dashboard.signals import (
     demo_result,
     ok_result,
     register_provider,
+    unavailable_result,
 )
 from ews_ingest.dashboard.signals.ism import parse_ism
 
@@ -27,12 +28,11 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
     demo = DemoValues.for_company(seed)
     source_id = ctx.source_for(ROLE)
     if source_id is None:
-        return demo_result(
-            label_hint="macro_health",
-            value=f"{demo.pmi()}",
-            score=abs(50.0 - demo.pmi()) * 5.0,
-            source_ids=(),
-            note="No PMI source bound — showing demo.",
+        # The role is intentionally left unbound in config when the underlying
+        # source is dead (ISM is paywalled, FRED doesn't mirror it). Report
+        # ``unavailable`` honestly rather than a misleading demo value.
+        return unavailable_result(
+            note="No PMI source bound for this portfolio.",
         )
     if missing := ctx.missing_env(source_id):
         return demo_result(

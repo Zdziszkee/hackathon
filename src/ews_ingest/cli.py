@@ -154,21 +154,13 @@ def cmd_onboard(args: argparse.Namespace, services: Services) -> int:
 def _default_entities_path() -> Path:
     """Resolve the company universe path.
 
-    Defaults to the dynamic JSON store (``./data/companies/companies.json``,
+    Uses only the dynamic JSON store (``./data/companies/companies.json``,
     editable from the dashboard via :mod:`ews_ingest.dashboard.company_store`).
-    Falls back to the legacy hand-curated ``config/entities.yaml`` for
-    backward-compat when ``EWS_COMPANIES_PATH`` is unset and the JSON store
-    does not exist yet.
     """
     explicit = os.environ.get("EWS_COMPANIES_PATH")
     if explicit:
         return Path(explicit)
-    json_path = Path(os.environ.get("EWS_COMPANIES_DIR", "./data/companies")) / "companies.json"
-    if json_path.exists():
-        return json_path
-    # Backfill seed: legacy hand-curated YAML until the dashboard persists JSON.
-    base = Path(__file__).resolve().parent
-    return base / "config" / "entities.yaml"
+    return Path(os.environ.get("EWS_COMPANIES_DIR", "./data/companies")) / "companies.json"
 
 
 def _services_from_env() -> Services:

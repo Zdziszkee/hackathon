@@ -25,7 +25,6 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
-from datetime import UTC, datetime
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -289,36 +288,3 @@ class CompanyStore:
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         tmp.replace(self._path)
-
-    # --------------------------------------------------------- bootstrap once
-    def seed_from_yaml(self, yaml_path: Path) -> int:
-        """One-time backfill: if the JSON store is empty, port the legacy
-        ``entities.yaml`` rows into the JSON store. Returns the number of
-        rows seeded. Existing JSON entries are preserved (yaml entries with a
-        ticker already present are skipped)."""
-        if not yaml_path.exists():
-            return 0
-        import yaml
-
-        with self._lock:
-            existing = self.load()
-            seen = {(e.ticker or "").upper() for e in existing}
-            raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or []
-            if not isinstance(raw, list):
-                return 0
-            added = 0
-            today_iso = datetime.now(UTC).date().isoformat()
-            for entry in raw:
-                if not isinstance(entry, dict):
-                    continue
-                ent = Identifiers.model_validate(entry)
-                if (ent.ticker or "").upper() in seen:
-                    continue
-                # Annotate source so the dashboard "added by" trail is honest.
-                ent.extra_ids.setdefault("seeded_from", f"entities.yaml@{today_iso}")
-                existing.append(ent)
-                seen.add((ent.ticker or "").upper())
-                added += 1
-            if added:
-                self._persist_all(existing)
-        return added

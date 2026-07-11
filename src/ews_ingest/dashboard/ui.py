@@ -363,23 +363,29 @@ details.pb-co-card[open] > summary .pb-co-toggle .pb-ico-minus{ display:inline-f
 .pb-co-comp-num{ font-size:22px; font-weight:700; color:var(--ink-900); line-height:1; }
 .pb-co-comp-lbl{ font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-500); font-weight:600; margin-top:3px; }
 
-/* Embed refresh button next to company header */
-.stButton button[kind="secondary"] {
-  font-size: 11px !important;
-  padding: 1px 6px !important;
-  min-height: 24px !important;
+/* Embed refresh/remove buttons next to company header (icon-like, HSBC clean) */
+.pb-company .stButton button {
+  font-size: 13px !important;
+  padding: 2px 5px !important;
+  min-height: 22px !important;
+  min-width: 22px !important;
   line-height: 1 !important;
+  border-radius: 4px !important;
+}
+.pb-company .stButton button[kind="secondary"] {
+  font-size: 12px !important;
 }
 .pb-company > div[data-testid="stHorizontalBlock"] {
   align-items: stretch;
   position: relative;
 }
 .pb-company > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child {
-  margin-left: -36px;
+  margin-left: -20px;
   display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  padding-top: 20px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  padding-top: 8px;
   z-index: 2;
   position: relative;
 }
@@ -454,6 +460,39 @@ details.pb-row[open] > summary .pb-row-toggle .pb-ico-minus{ display:inline-flex
 
 /* Add-company toolbar */
 .pb-toolbar{ display:flex; gap:10px; margin-bottom:24px; }
+
+/* Compact add/remove widget — not full width, HSBC clean */
+.pb-add-widget {
+  width: 340px;
+  max-width: 340px;
+  margin: 8px 0 16px;
+}
+.pb-add-widget .stSelectbox > div[data-baseweb="select"] {
+  min-height: 36px;
+}
+
+/* Compact action button in add widget (proportionally smaller, HSBC style) */
+.pb-add-widget div[data-testid="stButton"] button {
+  font-size: 11px !important;
+  padding: 3px 8px !important;
+  min-height: 24px !important;
+  border-radius: 4px !important;
+}
+.pb-add-action {
+  margin-top: 8px;
+}
+.pb-chip-remove {
+  font-size: 12px !important;
+  padding: 2px 8px !important;
+  border-radius: 999px !important;
+  border: 1px solid var(--line-200) !important;
+  background: var(--card-bg) !important;
+  color: var(--ink-700) !important;
+}
+.pb-chip-remove:hover {
+  border-color: var(--brand-red) !important;
+  color: var(--brand-red) !important;
+}
 
 @media (prefers-reduced-motion: reduce){ *{ transition:none !important; animation:none !important; } }
 </style>

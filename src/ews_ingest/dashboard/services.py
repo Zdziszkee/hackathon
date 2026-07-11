@@ -14,15 +14,20 @@ On mutating actions (Add / Remove) the cache is invalidated via
 from __future__ import annotations
 
 import os
+import threading
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 
-from ews_ingest.config import Services, SourceConfig, make_services
+from ews_ingest.config import Services, SourceConfig, build_context, check_env, make_services
+from ews_ingest.core.entities import YamlEntityResolver
 from ews_ingest.core.http import HttpClient
+from ews_ingest.core.models import RawRecord
+from ews_ingest.core.registry import all_source_ids, get_source
 from ews_ingest.dashboard.bindings import IndicatorBindings, load_bindings
 from ews_ingest.dashboard.companies import Company, load_companies
 from ews_ingest.dashboard.company_store import CompanyStore
+from ews_ingest.dashboard.db import HistoricalStore
 from ews_ingest.dashboard.env import EnvResolver
 from ews_ingest.dashboard.landing import LandingReader
 from ews_ingest.dashboard.signals import SignalContext
@@ -38,6 +43,7 @@ __all__ = [
     "get_inputs",
     "make_company_store",
     "make_env_resolver",
+    "make_historical_store",
     "make_http_client",
     "make_landing_reader",
     "make_sector_lookup",
@@ -51,7 +57,13 @@ CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 
 # Inputs the dashboard needs on every render. Returned as a frozen
 # tuple so it's hashable and easy to unpack at the call site.
-Inputs = tuple[list[Company], LandingReader, EnvResolver, CompanyStore, TickerSuggest]
+Inputs = tuple[
+    list[Company],
+    LandingReader,
+    EnvResolver,
+    CompanyStore,
+    TickerSuggest,
+]
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +106,78 @@ def _load_sources(path: Path) -> dict[str, SourceConfig]:
 
 def make_landing_reader() -> LandingReader:
     return LandingReader(Path(os.environ.get("EWS_LANDING_DIR", "./data/landing")))
+
+
+def make_historical_store() -> HistoricalStore:
+    db_path = Path(os.environ.get("EWS_DB_PATH", "./data/ews.db"))
+    return HistoricalStore(db_path)
+
+
+def trigger_refresh(ticker: str | None = None) -> None:  # noqa: C901
+    """Trigger refresh for a company (or global if None) in background thread.
+    Marks pending, runs sources to update DB (and landing).
+    UI should watch DB for updates.
+    """
+
+    def _run() -> None:  # noqa: C901
+        try:
+            services = make_services_from_env()
+            hist = make_historical_store()
+            source_ids = list(all_source_ids())
+            for sid in source_ids:
+                cfg = services.sources.get(sid)
+                if not cfg or not cfg.enabled:
+                    continue
+                if check_env(cfg):
+                    continue
+                ctx = build_context(services, sid, "force-" + (ticker or "global"))
+                if ticker:
+                    # find the company
+                    for comp in load_companies(companies_path()):
+                        if comp.identifiers.ticker == ticker:
+                            ctx.resolver = YamlEntityResolver([comp.identifiers])
+                            break
+                source = get_source(sid)
+                batch_size = 100
+                batch: list[RawRecord] = []
+                for rec in source.fetch(ctx):
+                    batch.append(rec)
+                    if len(batch) >= batch_size:
+                        services.writer.write(batch)
+                        # also to hist
+                        for r in batch:
+                            hist.write_records(
+                                sid,
+                                ticker,
+                                [
+                                    {
+                                        "fetched_at": r.fetched_at.isoformat(),
+                                        "payload": r.payload,
+                                        "content_hash": r.content_hash,
+                                        "run_id": r.fetch_run_id,
+                                    }
+                                ],
+                            )
+                        batch = []
+                if batch:
+                    services.writer.write(batch)
+                    for r in batch:
+                        hist.write_records(
+                            sid,
+                            ticker,
+                            [
+                                {
+                                    "fetched_at": r.fetched_at.isoformat(),
+                                    "payload": r.payload,
+                                    "content_hash": r.content_hash,
+                                    "run_id": r.fetch_run_id,
+                                }
+                            ],
+                        )
+        except Exception:  # noqa: S110
+            pass  # TODO: log failure
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def make_ticker_suggest(http: HttpClient | None = None) -> TickerSuggest:
@@ -147,12 +231,15 @@ def make_company_store(
     )
 
 
-def make_signal_ctx(landing: LandingReader, env: EnvResolver) -> SignalContext:
+def make_signal_ctx(
+    landing: LandingReader, env: EnvResolver, historical: HistoricalStore | None = None
+) -> SignalContext:
     return SignalContext(
         bindings=get_bindings(),
         landing=landing,
         env_present=env.is_present,
         missing_env=env.missing_for,
+        historical=historical,
     )
 
 

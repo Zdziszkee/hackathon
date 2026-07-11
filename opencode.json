@@ -1,0 +1,31 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": {
+    "pyright": {
+      "disabled": true
+    },
+    "ty": {
+      "command": ["uv", "run", "ty", "server"],
+      "extensions": [".py", ".pyi"]
+    },
+    "basedpyright": {
+      "command": ["uv", "run", "python", "-m", "basedpyright.langserver"],
+      "extensions": [".py", ".pyi"]
+    },
+    "ruff": {
+      "command": ["uv", "run", "ruff", "server"],
+      "extensions": [".py", ".pyi"]
+    }
+  },
+  "formatter": {
+    "uv": {
+      "disabled": true
+    },
+    "ruff": {
+      "command": ["uv", "run", "ruff", "format", "$FILE"]
+    }
+  },
+  "permission": {
+    "lsp": "allow"
+  }
+}

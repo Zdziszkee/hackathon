@@ -8,19 +8,23 @@ import pytest
 
 from ews_ingest.core.entities import YamlEntityResolver
 
-ENTITIES_YAML = (
-    Path(__file__).resolve().parents[2] / "src" / "ews_ingest" / "config" / "entities.yaml"
-)
-
 
 @pytest.fixture
-def resolver() -> YamlEntityResolver:
-    return YamlEntityResolver.from_yaml(ENTITIES_YAML)
+def resolver(tmp_path: Path) -> YamlEntityResolver:
+    # small seed for tests, no more hardcoded yaml
+    yaml_path = tmp_path / "entities.yaml"
+    yaml_path.write_text(
+        "- ticker: UPS\n  name: United Parcel Service\n  cik: '0001090727'\n"
+        "  extra_ids: {sector: transport_logistics}\n"
+        "- ticker: XOM\n  name: Exxon\n  cik: '0000034088'\n"
+        "  extra_ids: {sector: petrochemical}\n"
+    )
+    return YamlEntityResolver.from_yaml(yaml_path)
 
 
 def test_loads_expected_universe(resolver: YamlEntityResolver) -> None:
     ents = resolver.all()
-    assert len(ents) == 19
+    assert len(ents) == 2
 
 
 def test_ticker_lookup(resolver: YamlEntityResolver) -> None:
@@ -30,13 +34,13 @@ def test_ticker_lookup(resolver: YamlEntityResolver) -> None:
 
 
 def test_cik_lookup(resolver: YamlEntityResolver) -> None:
-    ent = resolver.find_ticker("DAL")
+    ent = resolver.find_ticker("UPS")
     assert ent is not None
-    assert ent.cik == "0000027904"
+    assert ent.cik == "0001090727"
 
 
 def test_sector_in_extra(resolver: YamlEntityResolver) -> None:
-    ent = resolver.find_ticker("CVX")
+    ent = resolver.find_ticker("XOM")
     assert ent is not None
     assert ent.extra_ids.get("sector") == "petrochemical"
 
@@ -49,4 +53,4 @@ def test_empty_resolver_when_missing(tmp_path: Path) -> None:
 
 def test_three_sectors_present(resolver: YamlEntityResolver) -> None:
     sectors = {e.extra_ids.get("sector") for e in resolver.all()}
-    assert {"transport_logistics", "airlines", "petrochemical"} <= sectors
+    assert {"transport_logistics", "petrochemical"} <= sectors
