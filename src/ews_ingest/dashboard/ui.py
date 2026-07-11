@@ -18,6 +18,7 @@ from pathlib import Path
 
 import streamlit as st
 
+from ews_ingest.dashboard.graph import CompanyGraph
 from ews_ingest.dashboard.icons import (
     STATUS_ICON,
     ic_alert,
@@ -55,9 +56,7 @@ try:
 except ImportError:
     _YFILES_AVAILABLE = False
 
-from typing import Any, cast
-
-from ews_ingest.dashboard.graph import CompanyGraph
+from typing import cast
 
 __all__ = [
     "inject_theme",
@@ -1249,6 +1248,75 @@ def render_company_card(
     st.markdown(html, unsafe_allow_html=True)
 
 
+_COMPANY_PALETTE: tuple[str, ...] = (
+    "#3B82F6",  # blue
+    "#10B981",  # emerald
+    "#F59E0B",  # amber
+    "#EF4444",  # red
+    "#8B5CF6",  # violet
+    "#EC4899",  # pink
+    "#14B8A6",  # teal
+    "#F97316",  # orange
+    "#06B6D4",  # cyan
+    "#84CC16",  # lime
+    "#A855F7",  # purple
+    "#EAB308",  # yellow
+)
+_DEFAULT_EDGE_COLOR = "#9CA3AF"
+_DEFAULT_NODE_COLOR = "#9FA1A4"
+
+
+def _company_color_map(companies: list[CompanyGraph]) -> dict[str, str]:
+    return {
+        c.ticker: _COMPANY_PALETTE[i % len(_COMPANY_PALETTE)]
+        for i, c in enumerate(companies)
+    }
+
+
+def _node_color(element: dict[str, object]) -> str:
+    props = element.get("properties") or {}
+    if not isinstance(props, dict):
+        return _DEFAULT_NODE_COLOR
+    c = props.get("color")
+    if isinstance(c, str):
+        return c
+    return _DEFAULT_NODE_COLOR
+
+
+def _node_scale(element: dict[str, object]) -> float:
+    props = element.get("properties") or {}
+    if not isinstance(props, dict):
+        return 1.0
+    raw = props.get("score")
+    score = float(raw) if isinstance(raw, (int, float, str)) else 0.0
+    return max(0.8, min(1.4, 0.8 + 0.6 * (score / 100.0)))
+
+
+def _edge_style(element: dict[str, object]) -> EdgeStyle:
+    props = element.get("properties") or {}
+    if not isinstance(props, dict):
+        props = {}
+    raw = props.get("weight")
+    weight = float(raw) if isinstance(raw, (int, float, str)) else 0.5
+    src_color = props.get("source_color")
+    color = src_color if isinstance(src_color, str) else _DEFAULT_EDGE_COLOR
+    return EdgeStyle(
+        thickness=3.0 if weight >= 0.5 else 1.5,
+        color=color,
+        directed=False,
+    )
+
+
+def _edge_label(element: dict[str, object]) -> str:
+    props = element.get("properties") or {}
+    if not isinstance(props, dict):
+        return ""
+    raw = props.get("weight")
+    if isinstance(raw, (int, float)):
+        return f"{float(raw):.2f}"
+    return ""
+
+
 def render_correlation_graph(
     companies: list[CompanyGraph],
     correlations: list[tuple[str, str, float]],
@@ -1260,49 +1328,35 @@ def render_correlation_graph(
         return None
     from ews_ingest.dashboard.graph import build_company_nodes
 
+    company_colors = _company_color_map(companies)
     nodes = build_company_nodes(companies)
+    for n in nodes:
+        n.properties["color"] = company_colors.get(n.id, _DEFAULT_NODE_COLOR)
+
     raw_edges = [
         Edge(
             start=src,
             end=dst,
-            properties={"weight": w, "kind": "sector" if w >= 0.5 else "score"},
+            properties={
+                "weight": w,
+                "kind": "sector" if w >= 0.5 else "score",
+                "source_color": company_colors.get(src, _DEFAULT_EDGE_COLOR),
+            },
         )
         for src, dst, w in correlations
     ]
-    nodes_arg: list[Node | dict[str, Any]] = cast(list[Node | dict[str, Any]], nodes)
-    edges_arg: list[Edge | dict[str, Any]] = cast(list[Edge | dict[str, Any]], raw_edges)
-
-    def _color(props: dict[str, object]) -> str:
-        status = str(props.get("status", ""))
-        return {
-            "good": "#29B32E",
-            "warning": "#F59E0B",
-            "bad": "#DB0011",
-            "demo": "#9FA1A4",
-        }.get(status, "#9FA1A4")
-
-    def _scale(props: dict[str, object]) -> float:
-        raw = props.get("score")
-        score = float(raw) if isinstance(raw, (int, float, str)) else 0.0
-        return max(0.8, min(1.4, 0.8 + 0.6 * (score / 100.0)))
-
-    def _edge_style(props: dict[str, object]) -> EdgeStyle:
-        raw = props.get("weight")
-        weight = float(raw) if isinstance(raw, (int, float, str)) else 0.5
-        return EdgeStyle(
-            thickness=3.0 if weight >= 0.5 else 1.5,
-            color="#9CA3AF",
-            directed=False,
-        )
+    nodes_arg: list[Node | dict[str, object]] = cast(list[Node | dict[str, object]], nodes)
+    edges_arg: list[Edge | dict[str, object]] = cast(list[Edge | dict[str, object]], raw_edges)
 
     widget = StreamlitGraphWidget(
         nodes=nodes_arg,
         edges=edges_arg,
         node_label_mapping="label",
-        node_color_mapping=_color,
-        node_scale_factor_mapping=_scale,
+        node_color_mapping=_node_color,
+        node_scale_factor_mapping=_node_scale,
         node_styles_mapping=lambda _p: NodeStyle(shape=NodeShape.ELLIPSE),
         edge_styles_mapping=_edge_style,
+        edge_label_mapping=_edge_label,
     )
     return widget.show(
         directed=False,

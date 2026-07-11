@@ -18,6 +18,7 @@ updates via fragments; no blocking; last-update timestamps from DB.
 from __future__ import annotations
 
 import hashlib
+import logging
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -90,7 +91,35 @@ def _render_correlation_graph(computed: list[CompanyResult]) -> None:
         )
         for co, _res, composite, _flags in computed
     ]
-    edges = build_correlation_edges(companies_graph)
+
+    # Fetch historical returns for Granger causality (MVP: yfinance; replace
+    # with your landed price/earnings surprise series in production).
+    import pandas as pd
+    import yfinance as yf
+
+    returns: dict[str, pd.Series] = {}
+    tickers = [c.ticker for c in companies_graph]
+    if tickers:
+        try:
+            hist = yf.download(
+                tickers, period="2y", progress=False, auto_adjust=True
+            )["Close"]
+            if isinstance(hist, pd.Series):
+                hist = hist.to_frame()
+            rets = hist.pct_change().dropna(how="all")
+            for t in tickers:
+                if t in rets.columns:
+                    s = rets[t].dropna()
+                    if len(s) > 60:
+                        returns[t] = s
+        except Exception as exc:
+            logging.getLogger(__name__).warning("yfinance fetch failed: %s", exc)
+
+    # Try Granger causality first; fall back to sector/score heuristic
+    # if no returns data or no significant edges were found.
+    edges = build_correlation_edges(companies_graph, returns or None)
+    if not edges and companies_graph:
+        edges = build_correlation_edges(companies_graph)
 
     returned = render_correlation_graph(companies_graph, edges)
     st.session_state["graph_selected"] = (
