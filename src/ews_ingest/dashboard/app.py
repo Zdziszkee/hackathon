@@ -34,6 +34,7 @@ from ews_ingest.dashboard.compute import (
     composite_status as _composite_status,
 )
 from ews_ingest.dashboard.db import HistoricalStore, make_historical_store
+from ews_ingest.dashboard.landing import LandingReader
 from ews_ingest.dashboard.services import (
     bust_inputs_cache,
     get_bindings,
@@ -174,9 +175,9 @@ def main() -> None:
 
     render_portfolio_overview(stats)
 
-    # --- Company correlation graph (lazy, only when there is data) ---
+    # --- Company correlation graph (always expanded) ---
     if computed:
-        with st.expander("Correlation graph", expanded=False):
+        with st.expander("Correlation graph", expanded=True):
             _render_correlation_graph(computed)
     st.caption(
         "Historical data served from SQLite DB (data/ews.db). "
@@ -201,11 +202,13 @@ def main() -> None:
         )
     else:
         # --- Company cards, sorted by composite risk descending ---
-        _render_company_cards(computed, hist)
+        _render_company_cards(computed, hist, landing)
 
 
 def _render_company_cards(
-    computed: list[CompanyResult], hist: HistoricalStore | None = None
+    computed: list[CompanyResult],
+    hist: HistoricalStore | None = None,
+    landing: LandingReader | None = None,
 ) -> None:
     from ews_ingest.dashboard.ui import render_company_card
 
@@ -218,9 +221,17 @@ def _render_company_cards(
     for company, results, composite, _flags in sorted_results:
         comp_status = _composite_status(composite)
         ticker = (company.ticker or "").upper()
-        left, right = st.columns([0.88, 0.12], gap="small")
+        last = hist.get_last_update(ticker) if hist else None
+        if not last and landing:
+            last = landing.latest_fetched_at(
+                ticker,
+                name=company.identifiers.name if hasattr(company, "identifiers") else None,
+                cik=company.identifiers.cik if hasattr(company, "identifiers") else None,
+            )
+
+        st.markdown('<div class="pb-company-row">', unsafe_allow_html=True)
+        left, right = st.columns([0.98, 0.02], gap="small")
         with left:
-            st.markdown('<div class="pb-company">', unsafe_allow_html=True)
             render_company_card(
                 company.name,
                 company.sector,
@@ -229,17 +240,22 @@ def _render_company_cards(
                 comp_status,
                 ((p.indicator_id, p.label, p.description, r) for p, r in results),
                 _collect_sources(results),
+                last_update=last,
                 anchor_id=ticker,
             )
-            last = hist.get_last_update(ticker) if hist else None
-            if last:
-                st.caption(f"DB last: {last}")
-            st.markdown("</div>", unsafe_allow_html=True)
         with right:
-            if st.button("↻", key=f"ews_refresh_{ticker}", help="Refresh this company"):
-                st.session_state.setdefault("pending_refreshes", {})[ticker] = True
-                trigger_refresh(ticker)
+            if st.button(
+                "↻",
+                key=f"ews_refresh_{ticker}",
+                help="Refresh this company",
+                use_container_width=False,
+                width="content",
+            ):
+                with st.spinner(f"Refetching latest data for {ticker}..."):
+                    st.session_state.setdefault("pending_refreshes", {})[ticker] = True
+                    trigger_refresh(ticker, blocking=True)
                 st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
 
     if focus_ticker and scroll_key and not st.session_state.get(scroll_key):
         import streamlit.components.v1 as _st_v1
@@ -325,7 +341,8 @@ def _render_add_company_form(
                 else:
                     bust_inputs_cache()
                     st.session_state.setdefault("pending_refreshes", {})[added.ticker] = True
-                    trigger_refresh(added.ticker)
+                    with st.spinner(f"Fetching data for {added.ticker} so it renders..."):
+                        trigger_refresh(added.ticker, blocking=True)
                     sector_label = added.extra_ids.get("sector", "") or "(unknown)"
                     st.success(
                         f"Added {added.ticker} ({added.name}) — "

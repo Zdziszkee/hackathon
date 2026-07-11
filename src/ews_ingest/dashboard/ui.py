@@ -334,10 +334,11 @@ details[data-testid="stExpander"] [data-testid="stExpanderDetails"]{ padding:0 2
 details.pb-co-card{
   background:var(--card-bg); border-radius:var(--radius-card); box-shadow:var(--shadow-card);
   overflow:hidden; margin-bottom:16px;
+  position: relative;
 }
 details.pb-co-card > summary{
   list-style:none; cursor:pointer; outline:none;
-  display:flex; align-items:center; gap:16px; padding:20px 24px;
+  display:flex; align-items:center; gap:16px; padding:20px 60px 20px 24px;
   transition:background .15s ease;
 }
 details.pb-co-card > summary::-webkit-details-marker{ display:none; }
@@ -359,38 +360,56 @@ details.pb-co-card[open] > summary .pb-co-toggle .pb-ico-minus{ display:inline-f
 .pb-co-name{ font-size:16px; font-weight:600; color:var(--ink-900); }
 .pb-co-meta{ font-size:12px; color:var(--ink-500); margin-top:2px; display:flex; gap:8px; align-items:center; }
 .pb-co-ticker{ font-family:"JetBrains Mono",ui-monospace,monospace; font-size:12px; color:var(--ink-500); }
-.pb-co-comp{ text-align:right; }
+.pb-co-comp{ text-align:right; display:flex; flex-direction:column; align-items:flex-end; }
 .pb-co-comp-num{ font-size:22px; font-weight:700; color:var(--ink-900); line-height:1; }
 .pb-co-comp-lbl{ font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-500); font-weight:600; margin-top:3px; }
+.pb-co-last{ font-size:10px; color:var(--ink-400); font-family:"JetBrains Mono",ui-monospace,monospace; margin-top:1px; opacity:0.95; text-align:right; white-space:nowrap; }
+.pb-co-last:empty { display: none; }
+.pb-co-right{ display:flex; align-items:center; gap:8px; margin-left:auto; }
 
-/* Embed refresh/remove buttons next to company header (icon-like, HSBC clean) */
-.pb-company .stButton button {
-  font-size: 13px !important;
-  padding: 2px 5px !important;
-  min-height: 22px !important;
-  min-width: 22px !important;
+/* Company row with overlaid refresh button.
+   Right column is made absolute so button overlays the card header (inside visual card, top-right).
+   Uses layout from docs + absolute positioning on column to solve nesting/flow issues with unsafe HTML + widgets.
+ */
+.pb-company-row {
+  position: relative;
+}
+.pb-company-row > div[data-testid="stHorizontalBlock"] {
+  position: relative;
+}
+.pb-company-row > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:first-child {
+  width: 100% !important;
+}
+.pb-company-row > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child {
+  position: absolute !important;
+  top: 10px;
+  right: 28px;
+  z-index: 30;
+  width: 16px !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+.pb-company-row > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child div[data-testid="stButton"] {
+  width: auto !important;
+  margin: 0 !important;
+}
+.pb-company-row div[data-testid="stButton"] button {
+  font-size: 6px !important;
+  padding: 0 !important;
+  min-height: 10px !important;
+  min-width: 10px !important;
+  height: 10px !important;
   line-height: 1 !important;
-  border-radius: 4px !important;
+  border-radius: 1px !important;
+  box-shadow: none !important;
+  border: 1px solid var(--line-200) !important;
+  background: var(--card-bg) !important;
+  transform: scale(0.65) !important;
+  transform-origin: center !important;
 }
-.pb-company .stButton button[kind="secondary"] {
-  font-size: 12px !important;
-}
-.pb-company > div[data-testid="stHorizontalBlock"] {
-  align-items: stretch;
-  position: relative;
-}
-.pb-company > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child {
-  margin-left: -20px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  padding-top: 8px;
-  z-index: 2;
-  position: relative;
-}
-.pb-company > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child > div[data-testid="stButton"] {
-  margin: 0;
+.pb-company-row div[data-testid="stButton"] button[kind="secondary"] {
+  font-size: 6px !important;
 }
 
 /* Indicator rows */
@@ -409,7 +428,11 @@ details.pb-row > summary:hover{ background:var(--line-soft); border-radius:6px; 
   width:40px; height:40px; border-radius:8px; background:var(--tile-100);
   display:flex; align-items:center; justify-content:center; flex-shrink:0;
 }
-.pb-row-tile svg{ fill:currentColor; }
+.pb-row-tile svg {
+  color: inherit !important;
+  stroke: currentColor !important;
+  fill: currentColor !important;
+}
 .pb-row-label{ font-size:15px; font-weight:600; color:var(--ink-900); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .pb-row-val{ font-size:14px; font-weight:600; color:var(--ink-900); font-family:"JetBrains Mono",ui-monospace,monospace; }
 .pb-row-badge{
@@ -1075,6 +1098,10 @@ def _row_html(
     topic_ic = topic_ic_fn(20)
     acc = ACCENTS.get(indicator_id, {"bg": "var(--tile-100)", "fg": "#6B7280"})
 
+    # Hardcode color into SVGs to ensure they render (currentColor + CSS inheritance is unreliable in st.html/markdown)
+    topic_ic = topic_ic.replace("currentColor", acc["fg"])
+    status_ic = status_ic.replace("currentColor", fg)
+
     badges = _status_badge(result.status)
     if result.status == "demo":
         badges += (
@@ -1148,14 +1175,35 @@ def render_company_card(
     status: str,
     rows: Iterable[tuple[str, str, str, SignalResult]],
     sources: Iterable[str],
+    last_update: str | None = None,
     *,
     anchor_id: str | None = None,
 ) -> None:
-    """One collapsible borrower card: header with score tile, body with
-    expandable indicator rows (data-table pattern)."""
+    """Full company card using native <details> for collapsible look (cohesive with header).
+    Last updated placed inside the comp area in the summary (always visible).
+    Uses st.html for raw HTML to avoid markdown interference.
+    """
     tok = _token(status)
     fg = tok["fg"]
     sector_pretty = _display_sector(sector)
+
+    if last_update:
+        short = last_update
+        if "." in short:
+            if "+" in short:
+                base, tz = short.split("+", 1)
+                base = base.split(".")[0]
+                short = base + "+" + tz
+            else:
+                short = short.split(".")[0]
+        if short.endswith("+00:00"):
+            short = short[:-6] + "Z"
+        last_html = (
+            f'<div class="pb-co-last" title="{_esc(last_update)}">Last updated: {_esc(short)}</div>'
+        )
+    else:
+        last_html = '<div class="pb-co-last"></div>'
+
     body_rows = "".join(_row_html(iid, lbl, desc, result) for iid, lbl, desc, result in rows)
     srcs = [s for s in sources if s]
     src_html = ""
@@ -1183,16 +1231,21 @@ def render_company_card(
             <span>{sector_pretty}</span>
           </div>
         </div>
-        <div class="pb-co-comp">
-          <div class="pb-co-comp-num" style="color:{fg}">{composite:.0f}</div>
-          <div class="pb-co-comp-lbl">composite / 100</div>
+        <div class="pb-co-right">
+          <div class="pb-co-comp">
+            <div class="pb-co-comp-num" style="color:{fg}">{composite:.0f}</div>
+            <div class="pb-co-comp-lbl">composite / 100</div>
+            {last_html}
+          </div>
+          <span class="pb-co-toggle"><span class="pb-ico-plus">{ic_plus(18)}</span><span class="pb-ico-minus">{ic_minus(18)}</span></span>
         </div>
-        <span class="pb-co-toggle"><span class="pb-ico-plus">{ic_plus(18)}</span><span class="pb-ico-minus">{ic_minus(18)}</span></span>
       </summary>
       <div class="pb-rows">{body_rows}</div>
       {src_html}
     </details>
     """
+    # Replace any remaining currentColor (toggles, info icons etc.) with a visible gray
+    html = html.replace("currentColor", "#9FA1A4")
     st.markdown(html, unsafe_allow_html=True)
 
 

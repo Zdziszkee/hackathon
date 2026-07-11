@@ -82,6 +82,42 @@ class LandingReader:
         for rec in self.read(source_id, since=since).records:
             yield rec.payload
 
+    def latest_fetched_at(
+        self,
+        ticker: str | None,
+        *,
+        name: str | None = None,
+        cik: str | None = None,
+    ) -> str | None:
+        """Return ISO timestamp of the most recent record matching the company (ticker/cik/name)."""
+        if not (ticker or name or cik):
+            return None
+        t = (ticker or "").upper()
+        n = (name or "").upper().strip()
+        c = (cik or "").upper()
+        latest: datetime | None = None
+        for sid in self.available_source_ids():
+            for rec in self.read(sid).records:
+                ents = getattr(rec, "entities", []) or []
+                matched = False
+                for e in ents:
+                    et = (getattr(e, "ticker", None) or "").upper()
+                    en = (getattr(e, "name", None) or "").upper().strip()
+                    ec = (getattr(e, "cik", None) or "").upper()
+                    name_hit = n and (en == n or n in en or en in n)
+                    if (t and et == t) or (c and ec == c) or name_hit:
+                        matched = True
+                        break
+                if not matched:
+                    p = getattr(rec, "payload", {}) or {}
+                    for k in ("ticker", "symbol", "Ticker", "Symbol"):
+                        if str(p.get(k) or "").upper() == t:
+                            matched = True
+                            break
+                if matched and (latest is None or rec.fetched_at > latest):
+                    latest = rec.fetched_at
+        return latest.isoformat() if latest else None
+
 
 def _parse_dt(name: str) -> date | None:
     stem = name.removeprefix("dt=")

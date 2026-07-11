@@ -23,7 +23,8 @@ from ews_ingest.config import Services, SourceConfig, build_context, check_env, 
 from ews_ingest.core.entities import YamlEntityResolver
 from ews_ingest.core.http import HttpClient
 from ews_ingest.core.models import RawRecord
-from ews_ingest.core.registry import all_source_ids, get_source
+from ews_ingest.core.protocol import Scope
+from ews_ingest.core.registry import all_source_ids, get_source, pick_sources
 from ews_ingest.dashboard.bindings import IndicatorBindings, load_bindings
 from ews_ingest.dashboard.companies import Company, load_companies
 from ews_ingest.dashboard.company_store import CompanyStore
@@ -113,17 +114,26 @@ def make_historical_store() -> HistoricalStore:
     return HistoricalStore(db_path)
 
 
-def trigger_refresh(ticker: str | None = None) -> None:  # noqa: C901
-    """Trigger refresh for a company (or global if None) in background thread.
-    Marks pending, runs sources to update DB (and landing).
-    UI should watch DB for updates.
+def trigger_refresh(ticker: str | None = None, *, blocking: bool = False) -> None:  # noqa: C901
+    """Trigger refresh for a company (or global if None).
+
+    When ``ticker`` given, only runs PER_ENTITY / FACILITY sources (the ones
+    that can produce per-borrower records) using a single-entity resolver.
+    Writes both to landing and to HistoricalStore (for last-update timestamps).
+
+    If blocking=True run sync (for add/refresh UX so data is present on next
+    render); else fire a daemon thread.
     """
 
-    def _run() -> None:  # noqa: C901
+    def _run() -> None:  # noqa: C901, PLR0912
         try:
             services = make_services_from_env()
             hist = make_historical_store()
-            source_ids = list(all_source_ids())
+            if ticker:
+                # only the sources that actually attach to a company
+                source_ids = pick_sources(scopes={Scope.PER_ENTITY, Scope.FACILITY})
+            else:
+                source_ids = list(all_source_ids())
             for sid in source_ids:
                 cfg = services.sources.get(sid)
                 if not cfg or not cfg.enabled:
@@ -132,9 +142,9 @@ def trigger_refresh(ticker: str | None = None) -> None:  # noqa: C901
                     continue
                 ctx = build_context(services, sid, "force-" + (ticker or "global"))
                 if ticker:
-                    # find the company
+                    # find the company (load from disk; thread-safe copy)
                     for comp in load_companies(companies_path()):
-                        if comp.identifiers.ticker == ticker:
+                        if (comp.identifiers.ticker or "").upper() == ticker.upper():
                             ctx.resolver = YamlEntityResolver([comp.identifiers])
                             break
                 source = get_source(sid)
@@ -144,7 +154,6 @@ def trigger_refresh(ticker: str | None = None) -> None:  # noqa: C901
                     batch.append(rec)
                     if len(batch) >= batch_size:
                         services.writer.write(batch)
-                        # also to hist
                         for r in batch:
                             hist.write_records(
                                 sid,
@@ -177,7 +186,10 @@ def trigger_refresh(ticker: str | None = None) -> None:  # noqa: C901
         except Exception:  # noqa: S110
             pass  # TODO: log failure
 
-    threading.Thread(target=_run, daemon=True).start()
+    if blocking:
+        _run()
+    else:
+        threading.Thread(target=_run, daemon=True).start()
 
 
 def make_ticker_suggest(http: HttpClient | None = None) -> TickerSuggest:
