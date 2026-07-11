@@ -97,7 +97,8 @@ even before the user clicks the bridge button.
 ### yFiles `StreamlitGraphWidget` settings
 
 - `nodes` — from `build_company_nodes`. Each `Node`:
-  - `id`: company ticker (uppercase, stable key).
+  - `id`: company ticker (uppercase, stable key, matches the anchor id on
+    the corresponding `<details>`).
   - `properties`: `{"label": ticker, "name": company.name, "sector": sector,
     "score": composite, "status": "good|warning|bad", "anchor_id": ticker}`.
 - `edges` — from `build_correlation_edges`. Each `Edge`:
@@ -116,7 +117,9 @@ even before the user clicks the bridge button.
 - `node_color_mapping`: callable returning `#29B32E` (good),
   `#F59E0B` (warning), `#DB0011` (bad), or `#9FA1A4` (demo / unknown).
 - `node_scale_factor_mapping`: `0.8 + 0.6 * (score / 100)`. Floor 0.8, ceiling 1.4.
-- `node_styles_mapping`: returns `NodeStyle(shape=NodeShape.ELLIPSE)`.
+- `node_styles_mapping`: returns `NodeStyle(shape=NodeShape.ELLIPSE)`. Does
+  *not* set `color` here — `node_color_mapping` owns the color so the two
+  mappings don't fight.
 - `edge_styles_mapping`: returns `EdgeStyle(thickness=1.5 if weight<0.5 else 3.0,
   color="#9CA3AF", directed=False)`.
 - `heat_mapping`: not used.
@@ -151,28 +154,11 @@ Wrapped in `st.components.v1.html(..., height=0)` and gated by a
 `st.session_state["scroll_done_{ticker}"]` flag so it fires exactly once per
 selection.
 
-### Edge-builder logic (moved from `app.py:217-245` verbatim)
+### Edge-builder logic (ported from `app.py:217-245`, ticker-keyed)
 
-```python
-def build_correlation_edges(
-    companies: list[tuple[str, float, str, str]],
-) -> list[tuple[str, str, float]]:
-    edges: list[tuple[str, str, float]] = []
-    n = len(companies)
-    for i in range(n):
-        for j in range(i + 1, n):
-            name_i, score_i, sec_i, _ = companies[i]
-            name_j, score_j, sec_j, _ = companies[j]
-            if sec_i == sec_j and sec_i != "Unknown":
-                edges.append((name_i, name_j, 0.75))
-            elif abs(score_i - score_j) < 10:
-                edges.append((name_i, name_j, 0.35))
-    return edges[:30]
-```
-
-`name` is the human name; the new function uses ticker (id) for the edge
-endpoints. A new `CompanyGraph` typed alias is added so callers don't have to
-keep passing bare 4-tuples:
+The body is the same as the existing inline loop, but takes the new
+`CompanyGraph` named tuple and emits `(ticker_i, ticker_j, weight)` so the
+edge endpoints match the node ids.
 
 ```python
 class CompanyGraph(NamedTuple):
@@ -180,7 +166,60 @@ class CompanyGraph(NamedTuple):
     score: float
     sector: str
     status: str  # "good" | "warning" | "bad"
-    ticker: str  # the node id, uppercase
+    ticker: str  # uppercase; the node id and edge endpoint
+
+
+def build_correlation_edges(
+    companies: list[CompanyGraph],
+) -> list[tuple[str, str, float]]:
+    edges: list[tuple[str, str, float]] = []
+    n = len(companies)
+    for i in range(n):
+        for j in range(i + 1, n):
+            c_i = companies[i]
+            c_j = companies[j]
+            if c_i.sector == c_j.sector and c_i.sector != "Unknown":
+                edges.append((c_i.ticker, c_j.ticker, 0.75))
+            elif abs(c_i.score - c_j.score) < 10:
+                edges.append((c_i.ticker, c_j.ticker, 0.35))
+    return edges[:30]
+
+
+def build_company_nodes(
+    companies: list[CompanyGraph],
+) -> list[Node]:
+    return [
+        Node(
+            id=c.ticker,
+            properties={
+                "label": c.ticker,
+                "name": c.name,
+                "sector": c.sector,
+                "score": c.score,
+                "status": c.status,
+                "anchor_id": c.ticker,
+            },
+        )
+        for c in companies
+    ]
+
+
+def select_focus_from_returned(
+    returned: tuple[list[dict], list[dict]] | None,
+) -> str | None:
+    """Pick the focus ticker from a yFiles `sync_selection` return value.
+
+    Returns the first selected node's id, or None if the selection is empty
+    or no node is selected. (Multi-select is collapsed to the first node —
+    the jump button and scroll shim operate on a single card at a time.)
+    """
+    if not returned:
+        return None
+    nodes, _edges = returned
+    if not nodes:
+        return None
+    first = nodes[0]
+    return first.get("id") if isinstance(first, dict) else None
 ```
 
 `_render_correlation_graph` constructs `list[CompanyGraph]` from `computed`
@@ -191,7 +230,16 @@ and passes it to the pure functions.
 - **yFiles import failure** — guarded at module import time in `ui.py`:
   ```python
   try:
-      from yfiles_graphs_for_streamlit import StreamlitGraphWidget, Node, Edge, …
+      from yfiles_graphs_for_streamlit import (
+          StreamlitGraphWidget,
+          Node,
+          Edge,
+          NodeShape,
+          NodeStyle,
+          EdgeStyle,
+          Layout,
+      )
+      _YFILES_AVAILABLE = True
   except ImportError:
       _YFILES_AVAILABLE = False
   ```
@@ -204,15 +252,23 @@ and passes it to the pure functions.
 - **Selection in demo mode** — selection still works; the focused card may be
   one of the demo set. If `focus_company` doesn't match a real card, the
   scroll shim is a no-op and `focus_company` is cleared on the next rerun.
+- **`focus_company` lifecycle** — the flag is set on jump-button click,
+  consumed on the next rerun (card opens + shim fires), then cleared
+  immediately after so a later unrelated rerun doesn't re-trigger the scroll.
+  The clear is unconditional — successful scroll or not.
 - **Rerun loop** — the JS shim is gated by a `scroll_done_{ticker}` session flag
   that is set immediately after the shim is rendered, so it cannot loop.
+- **yFiles unavailable** — narrows to a chip-strip fallback in `ui.py` only.
+  This is a hard-import failure path, not a demo path. The demo path always
+  uses the real yFiles graph.
 
 ## Demo Fallback
 
 The existing landing-empty demo (4–5 fake companies with synthetic scores)
 flows through the same `build_company_nodes` + `build_correlation_edges`
 + `StreamlitGraphWidget.show()` path. There is no separate "demo" branch in
-the graph layer; the chip-only path is removed entirely.
+the graph layer. The chip-strip path exists only as the fallback for the
+yFiles-import-failure case (a hard import error, not a runtime state).
 
 ## Testing
 
@@ -267,3 +323,8 @@ dependencies, no schema or data-pipeline changes.
    all pass.
 7. `uv run pytest tests/dashboard/test_correlation_graph.py` is green.
 8. No new dependencies in `pyproject.toml`.
+9. `focus_company` is consumed exactly once per click: set by the jump
+   button, used on the next rerun, then cleared. A subsequent unrelated
+   rerun (e.g. toggling a different widget) does not re-scroll the page.
+10. The graph's WebGL state survives a rerun triggered by an unrelated
+    Streamlit widget (verified by `key="ews_corr_graph"`).
