@@ -1109,6 +1109,8 @@ def render_company_card(
     status: str,
     rows: Iterable[tuple[str, str, str, SignalResult]],
     sources: Iterable[str],
+    *,
+    anchor_id: str | None = None,
 ) -> None:
     """One collapsible borrower card: header with score tile, body with
     expandable indicator rows (data-table pattern)."""
@@ -1128,8 +1130,9 @@ def render_company_card(
             f'<div class="pb-row-src">{chips}</div></div>'
         )
 
+    details_id = f' id="pb-co-{anchor_id}"' if anchor_id else ""
     html = f"""
-    <details class="pb-co-card">
+    <details class="pb-co-card"{details_id}>
       <summary>
         <div class="pb-co-score" style="background:{tok["bg"]};color:{fg}">{composite:.0f}</div>
         <div class="pb-co-titles">

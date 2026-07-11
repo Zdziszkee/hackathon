@@ -356,6 +356,7 @@ def _render_company_cards(computed: list[CompanyResult]) -> None:
                 comp_status,
                 ((p.indicator_id, p.label, p.description, r) for p, r in results),
                 _collect_sources(results),
+                anchor_id=ticker,
             )
         with btn_col:
             # ``on_click`` fires before the rerun — no explicit ``st.rerun()`` needed.
