@@ -40,10 +40,30 @@ from ews_ingest.dashboard.icons import (
 from ews_ingest.dashboard.signals.protocol import SignalResult
 from ews_ingest.dashboard.stats import PortfolioStats, SectorStat
 
+try:
+    from yfiles_graphs_for_streamlit import (
+        Edge,
+        EdgeStyle,
+        Layout,
+        Node,
+        NodeShape,
+        NodeStyle,
+        StreamlitGraphWidget,
+    )
+
+    _YFILES_AVAILABLE = True
+except ImportError:
+    _YFILES_AVAILABLE = False
+
+from typing import Any, cast
+
+from ews_ingest.dashboard.graph import CompanyGraph
+
 __all__ = [
     "inject_theme",
     "render_company_card",
     "render_correlation_graph",
+    "render_graph_jump_button",
     "render_portfolio_overview",
     "render_topbar",
     "status_color",
@@ -1135,16 +1155,94 @@ def render_company_card(
 
 
 def render_correlation_graph(
-    companies: list[tuple[str, float, str, str]],
-    _correlations: list[tuple[str, str, float]],
-) -> None:
+    companies: list[CompanyGraph],
+    correlations: list[tuple[str, str, float]],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]] | None:
     if not companies:
-        return
+        return None
+    if not _YFILES_AVAILABLE:
+        _render_correlation_chips_fallback(companies)
+        return None
+    from ews_ingest.dashboard.graph import build_company_nodes
+
+    nodes = build_company_nodes(companies)
+    raw_edges = [
+        Edge(
+            start=src,
+            end=dst,
+            properties={"weight": w, "kind": "sector" if w >= 0.5 else "score"},
+        )
+        for src, dst, w in correlations
+    ]
+    nodes_arg: list[Node | dict[str, Any]] = cast(list[Node | dict[str, Any]], nodes)
+    edges_arg: list[Edge | dict[str, Any]] = cast(list[Edge | dict[str, Any]], raw_edges)
+
+    def _color(props: dict[str, object]) -> str:
+        status = str(props.get("status", ""))
+        return {
+            "good": "#29B32E",
+            "warning": "#F59E0B",
+            "bad": "#DB0011",
+            "demo": "#9FA1A4",
+        }.get(status, "#9FA1A4")
+
+    def _scale(props: dict[str, object]) -> float:
+        raw = props.get("score")
+        score = float(raw) if isinstance(raw, (int, float, str)) else 0.0
+        return max(0.8, min(1.4, 0.8 + 0.6 * (score / 100.0)))
+
+    def _edge_style(props: dict[str, object]) -> EdgeStyle:
+        raw = props.get("weight")
+        weight = float(raw) if isinstance(raw, (int, float, str)) else 0.5
+        return EdgeStyle(
+            thickness=3.0 if weight >= 0.5 else 1.5,
+            color="#9CA3AF",
+            directed=False,
+        )
+
+    widget = StreamlitGraphWidget(
+        nodes=nodes_arg,
+        edges=edges_arg,
+        node_label_mapping="label",
+        node_color_mapping=_color,
+        node_scale_factor_mapping=_scale,
+        node_styles_mapping=lambda _p: NodeStyle(shape=NodeShape.ELLIPSE),
+        edge_styles_mapping=_edge_style,
+    )
+    return widget.show(
+        directed=False,
+        graph_layout=Layout.ORGANIC,
+        sync_selection=True,
+        sidebar={"enabled": True, "start_with": "Neighborhood"},
+        overview=True,
+        key="ews_corr_graph",
+    )
+
+
+def _render_correlation_chips_fallback(companies: list[CompanyGraph]) -> None:
     chips = " ".join(
-        f'<span class="pb-chip">{_esc(n)} <small>{sc:.0f}</small></span>'
-        for n, sc, sec, st in companies[:8]
+        f'<span class="pb-chip">{_esc(c.ticker)} <small>{c.score:.0f}</small></span>'
+        for c in companies[:8]
     )
     st.markdown(
         f'<div style="margin:8px 0"><div class="pb-chips">{chips}</div></div>',
         unsafe_allow_html=True,
     )
+
+
+def render_graph_jump_button(selected_ticker: str | None) -> str | None:
+    disabled = selected_ticker is None
+    help_text = (
+        "Click a node in the graph first."
+        if disabled
+        else "Scroll the matching company card into view and expand it."
+    )
+    clicked = st.button(
+        "↳ Jump to selected company",
+        key="ews_graph_jump",
+        disabled=disabled,
+        help=help_text,
+    )
+    if clicked and not disabled:
+        return selected_ticker
+    return None
