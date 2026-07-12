@@ -21,7 +21,9 @@ from ews_ingest.dashboard.signals import (
     SignalResult,
     cast_status,
     demo_result,
+    has_rate_limit_record,
     ok_result,
+    rate_limited_result,
     register_provider,
 )
 
@@ -138,6 +140,8 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             note="API key not configured — no data found.",
         )
     records = ctx.landing.read(source_id).records
+    if has_rate_limit_record(records):
+        return rate_limited_result(source_id)
     series = _read_company_closes(records, company)
     if len(series) < 2:
         return demo_result(

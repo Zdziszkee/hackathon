@@ -20,13 +20,14 @@ from __future__ import annotations
 import hashlib
 import logging
 import sys
-from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import streamlit as st
 
 from ews_ingest.dashboard.companies import Company
-from ews_ingest.dashboard.company_store import CompanyStore, TickerResolutionError
+from ews_ingest.dashboard.company_store import TickerResolutionError
 from ews_ingest.dashboard.compute import (
     CompanyResult,
     compute_company,
@@ -45,8 +46,9 @@ from ews_ingest.dashboard.services import (
     trigger_refresh,
 )
 from ews_ingest.dashboard.signals import list_providers
-from ews_ingest.dashboard.signals.protocol import SignalProvider, SignalResult
 from ews_ingest.dashboard.ticker_suggest import TickerSuggest
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "main",
@@ -56,18 +58,6 @@ __all__ = [
 # Back-compat re-export: the test suite imports ``_portfolio_stats`` from
 # this module. The implementation now lives in :mod:`ews_ingest.dashboard.compute`.
 _portfolio_stats = portfolio_stats
-
-
-def _collect_sources(
-    results: Iterable[tuple[SignalProvider, SignalResult]],
-) -> list[str]:
-    """Deduplicate and sort the ``source_ids`` across a company's results."""
-    seen: set[str] = set()
-    for _provider, result in results:
-        for sid in result.source_ids:
-            if sid and sid not in seen:
-                seen.add(sid)
-    return sorted(seen)
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +158,41 @@ def _ensure_data_for_new_companies(companies: list[Company], hist: HistoricalSto
         )
 
 
+def _process_queued_mutation() -> None:
+    """Legacy support for any remaining _pending_mutation flags.
+    Current add/remove uses direct select handling inside the companies fragment.
+    """
+    mutation = st.session_state.pop("_pending_mutation", None)
+    if mutation:
+        action = mutation.get("action")
+        tkr = mutation.get("ticker")
+        if tkr and action == "add":
+            try:
+                _, _, _, temp_store, _ = get_inputs()
+                added = temp_store.add_ticker(tkr)
+                bust_inputs_cache()
+                start = datetime.now(UTC).isoformat()
+                st.session_state.setdefault("pending_refreshes", {})[added.ticker] = start
+                trigger_refresh(added.ticker, blocking=False)
+                st.toast(f"Added {added.ticker}. Fetching data in background…", icon="⏳")
+            except TickerResolutionError as exc:
+                st.error(f"Could not resolve {tkr!r}: {exc}")
+            except Exception as exc:
+                st.error(f"Action failed: {exc}")
+
+
+def _start_company_refresh(ticker: str) -> None:
+    """Mark a company for background refresh and trigger it.
+    Used from refresh buttons so we can show loading state without full page white flash.
+    Toast via flag (displayed in fragment body).
+    """
+    start = datetime.now(UTC).isoformat()
+    st.session_state.setdefault("pending_refreshes", {})[ticker] = start
+    logger.info("starting refresh for ticker=%s via button", ticker)
+    trigger_refresh(ticker, blocking=False)
+    st.session_state["_toast"] = (f"Refreshing {ticker}…", "⏳")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -188,7 +213,10 @@ def main() -> None:
     )
     inject_theme()
 
-    companies, landing, env, store, suggest = get_inputs()
+    # Legacy queued processing (kept for backward compat with any stale flags).
+    _process_queued_mutation()
+
+    companies, landing, env, _store, suggest = get_inputs()
     hist = make_historical_store()
 
     providers = list_providers()
@@ -228,17 +256,6 @@ def main() -> None:
     # and trigger a background refresh.
     _ensure_data_for_new_companies(companies, hist)
 
-    pending = st.session_state.setdefault("pending_refreshes", {})
-    if pending:
-        # auto-clear any that now have DB records
-        for tkr in list(pending):
-            if tkr != "global" and hist.get_last_update(tkr):
-                pending.pop(tkr, None)
-        if pending:
-            st.caption(
-                "⏳ Background DB refresh(s) running for: " + ", ".join(sorted(pending.keys()))
-            )
-
     # --- Single centered column: no sidebar, no right rail ---
     render_topbar(len(companies))
 
@@ -257,42 +274,169 @@ def main() -> None:
     )
     st.divider()
 
-    # --- Add-company form (search bar at top of companies section) ---
-    st.markdown('<div class="pb-section-title">Companies</div>', unsafe_allow_html=True)
+    run_every = 5  # poll companies section (smooth loading resolution + live updates)
 
-    current_tickers = {(c.ticker or "").upper() for c in companies if c.ticker}
+    @st.fragment(run_every=run_every)
+    def _companies_section(suggest: TickerSuggest) -> None:
+        """Companies add/search + cards list in a single fragment.
 
-    # Narrow left-aligned search box (small width in left corner)
-    add_col, _ = st.columns([0.38, 0.62])
-    with add_col:
-        _render_add_company_form(store, suggest, current_tickers)
+        Live selectbox (picking does nothing).
+        Conditional button (+ Add / - Remove) appears only after selection.
+        Action only on button click; then full rerun so graph + overview + topbar
+        update with the new company set.
+        """
+        # Fresh companies from persisted JSON (instant on open/restart).
+        # Use outer computed for indicators; new ones show basic card until full update.
+        fresh_companies, landing_f, _env_f, _store_f, _ = get_inputs()
+        hist_f = make_historical_store()
 
-    if not computed:
-        st.info(
-            "No companies yet. Add one above by ticker (e.g. `AAPL`, `MSFT`, "
-            "`UPS`) — its CIK, name, and sector are resolved from SEC EDGAR."
+        # Build lookup from outer (stable) computed
+        results_lookup: dict[str, tuple[list[Any], float, int]] = {}
+        for c, res, comp, fl in computed:
+            results_lookup[(c.ticker or "").upper()] = (res, comp, fl)
+
+        current_tickers = {(c.ticker or "").upper() for c in fresh_companies if c.ticker}
+
+        st.markdown('<div class="pb-section-title">Companies</div>', unsafe_allow_html=True)
+
+        add_col, _ = st.columns([0.38, 0.62])
+        with add_col:
+            _render_add_company_form(suggest, current_tickers)
+
+        # Re-fetch companies (lightweight) so the cards section always sees the
+        # latest persisted list (add/remove now also does full rerun for graph etc.).
+        fresh_companies, landing_f, _env_f, _store_f, _ = get_inputs()
+        hist_f = make_historical_store()
+        current_tickers = {(c.ticker or "").upper() for c in fresh_companies if c.ticker}
+
+        # pending for this render (clear after so this render can show loading states)
+        pending = st.session_state.setdefault("pending_refreshes", {})
+        logger.debug(
+            "rendering companies section; fresh=%d pending=%s",
+            len(fresh_companies),
+            list(pending.keys()),
         )
-    else:
-        # --- Company cards, sorted by composite risk descending ---
-        _render_company_cards(computed, hist, landing)
+
+        if not fresh_companies:
+            st.info(
+                "No companies yet. Add one above by ticker (e.g. `AAPL`, `MSFT`, "
+                "`UPS`) — its CIK, name, and sector are resolved from SEC EDGAR."
+            )
+        else:
+            _render_company_cards(
+                fresh_companies,
+                hist_f,
+                landing_f,
+                pending,
+                results_lookup=results_lookup,
+            )
+
+        # Clear pending only once the background refresh has written the _refresh_complete
+        # marker (i.e. all per-entity sources have finished, whether they produced data,
+        # "no data found", or rate-limited markers). This guarantees the card shows the
+        # full indicator list instead of a partially populated one.
+        for tkr in list(pending):
+            if tkr != "global":
+                start = pending[tkr]
+                if not isinstance(start, str):
+                    start = "0"  # legacy bool/float
+                last_complete = hist_f.get_last_update(tkr, "_refresh_complete")
+                if last_complete and last_complete > start:
+                    logger.info(
+                        "clearing pending for %s (complete at %s > start %s)",
+                        tkr,
+                        last_complete,
+                        start,
+                    )
+                    pending.pop(tkr, None)
+        if pending:
+            st.caption(
+                "⏳ Background DB refresh(s) running for: " + ", ".join(sorted(pending.keys()))
+            )
+
+        # Display any toast scheduled during this run (from add/remove or refresh buttons).
+        # Must be in fragment body.
+        if "_toast" in st.session_state:
+            msg, icon = st.session_state.pop("_toast")
+            st.toast(msg, icon=icon)
+
+    _companies_section(suggest)
 
 
 def _render_company_cards(
-    computed: list[CompanyResult],
+    companies: list[Company],
     hist: HistoricalStore | None = None,
     landing: LandingReader | None = None,
+    pending: dict[str, str] | None = None,
+    *,
+    results_lookup: dict[str, tuple[list[object], float, int]] | None = None,
 ) -> None:
-    from ews_ingest.dashboard.ui import render_company_card
+    """Render the list of company cards (or loading states).
 
-    sorted_results = sorted(computed, key=lambda x: -x[2])
+    Accepts a list of companies (fresh) + optional results_lookup for the details.
+    Tickers in pending (value = ISO start time) show the loading card until
+    _refresh_complete marker timestamp > start.
+    """
+    from ews_ingest.dashboard.ui import (
+        render_company_card,
+        render_loading_company_card,
+    )
+
+    pending = pending or {}
+    results_lookup = results_lookup or {}
+
     focus_ticker = st.session_state.pop("focus_company", None)
     scroll_key = f"scroll_done_{focus_ticker}" if focus_ticker else None
     if focus_ticker and scroll_key:
         st.session_state.setdefault(scroll_key, False)
 
+    # Build display items from fresh companies (new ones use lookup fallback)
+    items: list[tuple[Company, list[Any], float, int]] = []
+    for company in companies:
+        t = (company.ticker or "").upper()
+        if t in results_lookup:
+            res, comp, fl = results_lookup[t]
+        else:
+            res, comp, fl = [], 0.0, 0
+        items.append((company, res, comp, fl))
+
+    sorted_results = sorted(items, key=lambda x: -x[2])
+
     for company, results, composite, _flags in sorted_results:
         comp_status = _composite_status(composite)
         ticker = (company.ticker or "").upper()
+
+        logger.debug(
+            "card for %s: indicators=%d composite=%.1f pending=%s",
+            ticker,
+            len(results),
+            composite,
+            ticker in pending,
+        )
+
+        # include demo/"no data" rows so newly added companies show full indicator list
+        real_results = list(results)
+
+        if ticker in pending:
+            # Show loading until the _refresh_complete marker (written after ALL
+            # per-entity sources for this ticker have run) is present and newer
+            # than the start time we recorded. This ensures the real card shows
+            # the complete indicator set (data + no-data + rate-limited) at once.
+            start = pending[ticker]
+            if not isinstance(start, str):
+                start = "0"
+            last_complete = hist.get_last_update(ticker, "_refresh_complete") if hist else None
+            if last_complete and last_complete > start:
+                pending.pop(ticker, None)
+                logger.debug("switching %s from loading to real card (complete marker)", ticker)
+            else:
+                render_loading_company_card(
+                    company.name,
+                    company.sector,
+                    ticker,
+                )
+                continue
+
         last = hist.get_last_update(ticker) if hist else None
         if not last and landing:
             last = landing.latest_fetched_at(
@@ -301,8 +445,7 @@ def _render_company_cards(
                 cik=company.identifiers.cik if hasattr(company, "identifiers") else None,
             )
 
-        st.markdown('<div class="pb-company-row">', unsafe_allow_html=True)
-        left, right = st.columns([0.98, 0.02], gap="small")
+        left, right = st.columns([0.94, 0.06], gap="small")
         with left:
             render_company_card(
                 company.name,
@@ -310,8 +453,7 @@ def _render_company_cards(
                 company.ticker,
                 composite,
                 comp_status,
-                ((p.indicator_id, p.label, p.description, r) for p, r in results),
-                _collect_sources(results),
+                ((p.indicator_id, p.label, p.description, r) for p, r in real_results),
                 last_update=last,
                 anchor_id=ticker,
             )
@@ -322,12 +464,10 @@ def _render_company_cards(
                 help="Refresh this company",
                 use_container_width=False,
                 width="content",
+                on_click=_start_company_refresh,
+                args=(ticker,),
             ):
-                with st.spinner(f"Refetching latest data for {ticker}..."):
-                    st.session_state.setdefault("pending_refreshes", {})[ticker] = True
-                    trigger_refresh(ticker, blocking=True)
-                st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
+                pass  # on_click handles marking + triggering
 
     if focus_ticker and scroll_key and not st.session_state.get(scroll_key):
         import streamlit.components.v1 as _st_v1
@@ -347,13 +487,16 @@ def _focus_scroll_js(ticker: str) -> str:
 
 
 def _render_add_company_form(
-    store: CompanyStore, suggest: TickerSuggest, current_tickers: set[str] | None = None
+    suggest: TickerSuggest, current_tickers: set[str] | None = None
 ) -> None:
-    """Add/remove widget using native Streamlit st.selectbox with filter_mode.
+    """Add/remove widget: live fuzzy selectbox + button that appears only after picking.
 
-    Search is narrow (left corner). After selecting a ticker, shows either
-    "Add to portfolio" or "Remove from portfolio" (single contextual button).
-    Follows HSBC-inspired sizing (compact 14px/compact padding).
+    Picking from the list does nothing by itself (no auto action).
+    When something is selected, a caption + button appears with clear info
+    ("+ Add TICKER" or "- Remove TICKER").
+    Action happens only on explicit button click.
+    This is the simple idiomatic Streamlit pattern (per docs: selectbox changes
+    are live; use button for the actual mutation to avoid accidental triggers).
     """
     current_tickers = current_tickers or set()
 
@@ -372,7 +515,7 @@ def _render_add_company_form(
     st.markdown('<div class="pb-add-widget">', unsafe_allow_html=True)
 
     selected = st.selectbox(
-        "Add company",
+        "Add or remove company",
         options=options,
         index=None,
         placeholder="Type ticker or name (fuzzy search)",
@@ -382,45 +525,52 @@ def _render_add_company_form(
         width=260,
     )
 
-    ticker: str | None = None
     if selected:
         ticker = selected.split(" — ")[0].strip().upper()
-
-    if ticker:
         is_present = ticker in current_tickers
-        label = "- Remove" if is_present else "+ Add"
-        btn_type = "secondary" if is_present else "primary"
-        help_text = f"{'Remove' if is_present else 'Add'} {ticker} from portfolio"
+        action = "Remove" if is_present else "Add"
+        label = f"{'-' if is_present else '+'} {action} {ticker}"
+        help_text = f"{'Remove' if is_present else 'Add'} {ticker} from the dashboard"
+
+        st.caption(f"Press the button to {action.lower()} {ticker}")
 
         if st.button(
             label,
-            type=btn_type,
-            key="action_btn",
-            use_container_width=False,
+            key="company_action_btn",
             help=help_text,
+            type="primary" if not is_present else "secondary",
             width="content",
         ):
             if is_present:
-                if store.remove_ticker(ticker):
-                    bust_inputs_cache()
-                    st.toast(f"Removed {ticker}", icon="🗑️")
-                    st.rerun()
+                try:
+                    _, _, _, temp_store, _ = get_inputs()
+                    if temp_store.remove_ticker(ticker):
+                        bust_inputs_cache()
+                        st.session_state["_toast"] = (f"Removed {ticker}", "🗑️")
+                except Exception as exc:
+                    st.error(f"Remove failed: {exc}")
             else:
                 try:
-                    added = store.add_ticker(ticker)
+                    _, _, _, temp_store, _ = get_inputs()
+                    added = temp_store.add_ticker(ticker)
+                    bust_inputs_cache()
+                    start = datetime.now(UTC).isoformat()
+                    st.session_state.setdefault("pending_refreshes", {})[added.ticker] = start
+                    trigger_refresh(added.ticker, blocking=False)
+                    st.session_state["_toast"] = (f"Added {added.ticker}. Fetching...", "⏳")
                 except TickerResolutionError as exc:
                     st.error(f"Could not resolve {ticker!r}: {exc}")
-                else:
-                    bust_inputs_cache()
-                    st.session_state.setdefault("pending_refreshes", {})[added.ticker] = True
-                    with st.spinner(f"Fetching data for {added.ticker} so it renders..."):
-                        trigger_refresh(added.ticker, blocking=True)
-                    sector_label = added.extra_ids.get("sector", "") or "(unknown)"
-                    st.success(
-                        f"Added {added.ticker} ({added.name}) — "
-                        f"CIK={added.cik}, sector={sector_label}"
-                    )
-                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Action failed: {exc}")
+
+            # Clear the select so it resets for next use
+            if "company_native_select" in st.session_state:
+                st.session_state.pop("company_native_select", None)
+
+            # Structural change: force full rerun so that topbar count, portfolio overview,
+            # and especially the correlation graph (which is built from the outer `computed`)
+            # pick up the new/removed company immediately.
+            st.rerun()
 
     st.markdown("</div>", unsafe_allow_html=True)
 

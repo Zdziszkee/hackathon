@@ -1,14 +1,12 @@
 """Service wiring for the Streamlit dashboard.
 
-Owns the constructors for :class:`HttpClient`, :class:`LandingReader`,
-:class:`CompanyStore`, the ticker suggester, the sector lookup, and the
-:func:`SignalContext`. Exposes a single :func:`get_inputs` entry point
-that the dashboard calls on every render — the result is cached for the
-lifetime of the Streamlit process so repeated reruns don't re-parse the
-JSON store or rebuild the HTTP client.
+The companies list is **always read fresh** from the on-disk JSON
+(`data/companies/companies.json` or EWS_COMPANIES_PATH) so that
+stocks added/removed in the UI survive full program restarts and
+appear instantly on next launch.
 
-On mutating actions (Add / Remove) the cache is invalidated via
-:func:`bust_inputs_cache`.
+Other readers (landing, http, store, suggest) are cached (lru) until
+an explicit :func:`bust_inputs_cache`.
 """
 
 from __future__ import annotations
@@ -22,8 +20,9 @@ from pathlib import Path
 
 from ews_ingest.config import Services, SourceConfig, build_context, check_env, make_services
 from ews_ingest.core.entities import YamlEntityResolver
+from ews_ingest.core.hashing import content_hash
 from ews_ingest.core.http import HttpClient
-from ews_ingest.core.models import RawRecord
+from ews_ingest.core.models import RawFormat, RawRecord, SourceType, utc_now
 from ews_ingest.core.protocol import Scope
 from ews_ingest.core.registry import all_source_ids, get_source, pick_sources
 from ews_ingest.dashboard.bindings import IndicatorBindings, load_bindings
@@ -35,6 +34,8 @@ from ews_ingest.dashboard.landing import LandingReader
 from ews_ingest.dashboard.signals import SignalContext
 from ews_ingest.dashboard.ticker_suggest import SecLiveTickerSuggest, TickerSuggest
 from ews_ingest.dashboard.yahoo_sector import SecLiveYahooSector, SectorLookup
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "CONFIG_DIR",
@@ -115,7 +116,7 @@ def make_historical_store() -> HistoricalStore:
     return HistoricalStore(db_path)
 
 
-def trigger_refresh(ticker: str | None = None, *, blocking: bool = False) -> None:  # noqa: C901
+def trigger_refresh(ticker: str | None = None, *, blocking: bool = False) -> None:  # noqa: C901, PLR0915
     """Trigger refresh for a company (or global if None).
 
     When ``ticker`` given, only runs PER_ENTITY / FACILITY sources (the ones
@@ -126,23 +127,27 @@ def trigger_refresh(ticker: str | None = None, *, blocking: bool = False) -> Non
     render); else fire a daemon thread.
     """
 
-    def _run() -> None:  # noqa: C901, PLR0912
+    def _run() -> None:  # noqa: C901, PLR0912, PLR0915
         services = make_services_from_env()
         hist = make_historical_store()
-        logger = logging.getLogger(__name__)
+        logger.info("trigger_refresh starting for ticker=%s blocking=%s", ticker, blocking)
         if ticker:
             # only the sources that actually attach to a company
             source_ids = pick_sources(scopes={Scope.PER_ENTITY, Scope.FACILITY})
         else:
             source_ids = list(all_source_ids())
+        logger.debug("sources for refresh: %s", source_ids)
         for sid in source_ids:
+            ctx = None
             try:
                 cfg = services.sources.get(sid)
                 if not cfg or not cfg.enabled:
                     continue
                 if check_env(cfg):
+                    logger.debug("skipping %s: missing env", sid)
                     continue
                 ctx = build_context(services, sid, "force-" + (ticker or "global"))
+                logger.debug("fetching source %s for %s", sid, ticker or "global")
                 if ticker:
                     # find the company (load from disk; thread-safe copy)
                     for comp in load_companies(companies_path()):
@@ -185,6 +190,12 @@ def trigger_refresh(ticker: str | None = None, *, blocking: bool = False) -> Non
                                 }
                             ],
                         )
+                    logger.debug(
+                        "wrote batch of %d records for sid=%s ticker=%s",
+                        len(batch),
+                        sid,
+                        ticker,
+                    )
             except Exception as exc:
                 logger.warning(
                     "per-entity refresh for %s failed on %s: %s",
@@ -192,12 +203,74 @@ def trigger_refresh(ticker: str | None = None, *, blocking: bool = False) -> Non
                     sid,
                     exc,
                 )
+                if ticker and ("429" in str(exc) or "Too Many Requests" in str(exc)):
+                    logger.warning("rate limit (429) detected for sid=%s ticker=%s", sid, ticker)
+                    try:
+                        now = utc_now()
+                        rid = f"rate-{int(now.timestamp())}"
+                        run_id = getattr(ctx, "run_id", rid) if ctx else rid
+                        err_payload: dict[str, object] = {
+                            "_rate_limited": True,
+                            "message": str(exc)[:200],
+                        }
+                        rec = RawRecord(
+                            source=sid,
+                            source_type=SourceType.API,
+                            fetched_at=now,
+                            fetch_run_id=run_id,
+                            payload=err_payload,
+                            raw_format=RawFormat.JSON,
+                            content_hash=content_hash(err_payload),
+                            entities=[],
+                        )
+                        services.writer.write([rec])
+                        hist.write_records(
+                            sid,
+                            ticker,
+                            [
+                                {
+                                    "fetched_at": now.isoformat(),
+                                    "payload": err_payload,
+                                    "content_hash": rec.content_hash,
+                                    "run_id": run_id,
+                                }
+                            ],
+                        )
+                        logger.info("wrote _rate_limited marker for sid=%s ticker=%s", sid, ticker)
+                    except Exception:
+                        logger.debug("rate limit marker write failed", exc_info=False)
                 continue
+
+        # after the for sid loop for this ticker's refresh run
+        if ticker:
+            try:
+                now = utc_now()
+                run_id = f"complete-{int(now.timestamp())}"
+                payload: dict[str, object] = {"_refresh_complete": True}
+                hist.write_records(
+                    "_refresh_complete",
+                    ticker,
+                    [
+                        {
+                            "fetched_at": now.isoformat(),
+                            "payload": payload,
+                            "content_hash": content_hash(payload),
+                            "run_id": run_id,
+                        }
+                    ],
+                )
+                logger.info(
+                    "_refresh_complete marker written for ticker=%s (all sources done)",
+                    ticker,
+                )
+            except Exception:
+                logger.debug("failed to write refresh complete marker for %s", ticker)
 
     if blocking:
         _run()
     else:
         threading.Thread(target=_run, daemon=True).start()
+    logger.debug("trigger_refresh dispatched for %s", ticker or "global")
 
 
 def make_ticker_suggest(http: HttpClient | None = None) -> TickerSuggest:
@@ -286,23 +359,32 @@ def make_services_from_env() -> Services:
 
 
 @lru_cache(maxsize=1)
-def get_inputs() -> Inputs:
+def _get_cached_inputs() -> tuple[LandingReader, EnvResolver, CompanyStore, TickerSuggest]:
+    """Cached heavy parts; companies list is always read fresh from disk below."""
     landing = make_landing_reader()
     http = make_http_client()
     sector_lookup = make_sector_lookup(http=http)
     store = make_company_store(landing, http=http, sector_lookup=sector_lookup)
-    return (
-        load_companies(store.path),
-        landing,
-        make_env_resolver(),
-        store,
-        make_ticker_suggest(http=http),
-    )
+    env = make_env_resolver()
+    suggest = make_ticker_suggest(http=http)
+    return landing, env, store, suggest
+
+
+def get_inputs() -> Inputs:
+    """Always returns fresh companies list from the persisted JSON (so dashboard
+    edits survive full program restarts and load instantly). Other readers are
+    cached until bust_inputs_cache().
+    """
+    landing, env, store, suggest = _get_cached_inputs()
+    companies = load_companies(store.path)
+    return (companies, landing, env, store, suggest)
 
 
 def bust_inputs_cache() -> None:
-    """Force :func:`get_inputs` to re-read the JSON store on next render."""
-    get_inputs.cache_clear()
+    """Force re-creation of cached readers/store on next get_inputs().
+    (The companies list is always freshly loaded from disk regardless.)
+    """
+    _get_cached_inputs.cache_clear()
 
 
 @lru_cache(maxsize=1)

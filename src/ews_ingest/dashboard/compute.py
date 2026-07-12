@@ -8,12 +8,15 @@ the functions in this module produce and consume.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 
 from ews_ingest.dashboard.companies import Company
 from ews_ingest.dashboard.signals import SignalContext
 from ews_ingest.dashboard.signals.protocol import SignalProvider, SignalResult
 from ews_ingest.dashboard.stats import PortfolioStats, SectorStat
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "CompanyResult",
@@ -22,11 +25,12 @@ __all__ = [
     "portfolio_stats",
 ]
 
-# Scores that count toward the composite. `demo` (shown as "no data found")
-# is a deterministic estimate (worth counting when no real data has landed);
-# only `unavailable` is excluded.
+# Scores that count toward the composite. Only real landed data;
+# `demo` ("no data found") rows are now included (for new companies to show full list)
+# composite so we never display a score derived from missing data.
 ScoredStatus = str  # "good" | "warning" | "bad" | "demo"
-_SCORED_STATUSES: frozenset[ScoredStatus] = frozenset({"good", "warning", "bad", "demo"})
+_SCORED_STATUSES: frozenset[ScoredStatus] = frozenset({"good", "warning", "bad"})
+
 
 # Tiles backed by landed data (used for the coverage KPI only).
 _REAL_STATUSES: frozenset[ScoredStatus] = frozenset({"good", "warning", "bad"})
@@ -95,11 +99,27 @@ def compute_company(
     for provider in providers:
         result = provider.compute(company.identifiers, ctx)
         results.append((provider, result))
+        logger.debug(
+            "compute indicator %s for %s: status=%s score=%.1f value=%s note=%s",
+            provider.indicator_id,
+            company.ticker or company.identifiers.name,
+            result.status,
+            result.score,
+            result.value,
+            result.note,
+        )
         if result.status in _SCORED_STATUSES:
             scores.append(result.score)
         if provider.indicator_id == _SANCTIONS_INDICATOR and result.status in _SCORED_STATUSES:
             flags = _parse_sanctions_flag(result.value)
     composite = sum(scores) / len(scores) if scores else 0.0
+    logger.debug(
+        "composite for %s = %.1f (scored %d / %d)",
+        company.ticker,
+        composite,
+        len(scores),
+        len(results),
+    )
     return results, composite, flags
 
 

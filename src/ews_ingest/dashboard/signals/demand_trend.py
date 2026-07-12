@@ -20,7 +20,9 @@ from ews_ingest.dashboard.signals import (
     SignalResult,
     cast_status,
     demo_result,
+    has_rate_limit_record,
     ok_result,
+    rate_limited_result,
     register_provider,
 )
 
@@ -107,7 +109,10 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
         # TCU + TRUCKD11). Restrict to demand series so the slope reflects
         # real activity, not a mixed-unit soup. iter_payloads yields only
         # the payload dict, so go through ``read`` to access ``extra.series_id``.
-        for rec in ctx.landing.read(source_id).records:
+        recs = ctx.landing.read(source_id).records
+        if has_rate_limit_record(recs):
+            return rate_limited_result(source_id)
+        for rec in recs:
             extra_obj: object = getattr(rec, "extra", None)
             if not isinstance(extra_obj, dict):
                 continue

@@ -24,7 +24,9 @@ from ews_ingest.dashboard.signals import (
     SignalContext,
     SignalResult,
     demo_result,
+    has_rate_limit_record,
     ok_result,
+    rate_limited_result,
     register_provider,
 )
 from ews_ingest.dashboard.signals.ism import parse_ism
@@ -132,6 +134,8 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
         missing_env.extend(ctx.missing_env(sid))
 
     gscpi_z: float | None = None
+    if gscpi_sid and has_rate_limit_record(list(ctx.landing.read(gscpi_sid).records)):
+        return rate_limited_result(gscpi_sid)
     if gscpi_sid and not ctx.missing_env(gscpi_sid):
         for payload in ctx.landing.iter_payloads(gscpi_sid):
             # Two payload shapes are accepted:
@@ -153,6 +157,9 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
     new_orders: float | None = None
     supp_del: float | None = None
     if pmi_sid and not ctx.missing_env(pmi_sid):
+        pmi_recs = ctx.landing.read(pmi_sid).records
+        if has_rate_limit_record(pmi_recs):
+            return rate_limited_result(pmi_sid)
         store = ctx.landing.read(pmi_sid)
         latest = store.latest()
         if latest is not None:

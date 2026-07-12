@@ -7,9 +7,12 @@ Ingestion (datasources) feed it independently.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["HistoricalStore", "make_historical_store"]
 
@@ -93,7 +96,9 @@ class HistoricalStore:
             row = self._conn.execute(
                 "SELECT max(fetched_at) FROM records WHERE ticker = ?", (ticker,)
             ).fetchone()
-        return row[0] if row and row[0] else None
+        ts = row[0] if row and row[0] else None
+        logger.debug("get_last_update ticker=%s source=%s -> %s", ticker, source_id, ts)
+        return ts
 
     def get_historical(
         self, ticker: str, source_id: str | None = None, limit: int = 100

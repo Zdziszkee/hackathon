@@ -15,7 +15,9 @@ from ews_ingest.dashboard.signals import (
     SignalResult,
     cast_status,
     demo_result,
+    get_rate_limit_message,
     ok_result,
+    rate_limited_result,
     register_provider,
 )
 
@@ -47,6 +49,8 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             note="Required env var(s) not set — showing demo flag count.",
         )
     records = ctx.landing.read(source_id).records
+    if (msg := get_rate_limit_message(records)) is not None:
+        return rate_limited_result(source_id, msg)
     if not records:
         return demo_result(
             label_hint="geopolitical",

@@ -27,7 +27,9 @@ from ews_ingest.dashboard.signals import (
     SignalResult,
     cast_status,
     demo_result,
+    has_rate_limit_record,
     ok_result,
+    rate_limited_result,
     register_provider,
 )
 
@@ -168,6 +170,8 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             note="API key not configured — no data found.",
         )
     records = ctx.landing.read(source_id).records
+    if has_rate_limit_record(records):
+        return rate_limited_result(source_id)
     insider, institutional = _count_for_company(records, company)
     total = insider + institutional
     if total == 0:

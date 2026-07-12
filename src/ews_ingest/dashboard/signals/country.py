@@ -15,7 +15,9 @@ from ews_ingest.dashboard.signals import (
     SignalResult,
     cast_status,
     demo_result,
+    has_rate_limit_record,
     ok_result,
+    rate_limited_result,
     register_provider,
 )
 
@@ -65,7 +67,10 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
         primary = _TITLE.get(seeded.lower(), seeded)
         countries: set[str] = {primary}
         # corroborate with any landed records
-        for rec in ctx.landing.read(source_id).records:
+        recs = ctx.landing.read(source_id).records
+        if has_rate_limit_record(recs):
+            return rate_limited_result(source_id)
+        for rec in recs:
             if _matches_entity(rec.entities, company):
                 c = _country_from_record(rec.payload)
                 if c:
@@ -84,6 +89,8 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
         )
 
     records = ctx.landing.read(source_id).records
+    if has_rate_limit_record(records):
+        return rate_limited_result(source_id)
     if not records:
         return demo_result(
             label_hint="country",

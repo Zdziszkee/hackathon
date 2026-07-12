@@ -23,7 +23,9 @@ from ews_ingest.dashboard.signals import (
     SignalResult,
     cast_status,
     demo_result,
+    has_rate_limit_record,
     ok_result,
+    rate_limited_result,
     register_provider,
 )
 
@@ -100,8 +102,11 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             note="API key(s) not configured — no data found.",
         )
 
+    recs = ctx.landing.read(source_id).records
+    if has_rate_limit_record(recs):
+        return rate_limited_result(source_id)
     compounds: list[float] = []
-    for rec in ctx.landing.read(source_id).records:
+    for rec in recs:
         if not _matches_entity(getattr(rec, "entities", None), company):
             continue
         text = _story_text(rec.payload)

@@ -67,6 +67,7 @@ __all__ = [
     "render_company_card",
     "render_correlation_graph",
     "render_graph_jump_button",
+    "render_loading_company_card",
     "render_portfolio_overview",
     "render_topbar",
     "status_color",
@@ -353,7 +354,7 @@ details.pb-co-card{
 }
 details.pb-co-card > summary{
   list-style:none; cursor:pointer; outline:none;
-  display:flex; align-items:center; gap:16px; padding:20px 60px 20px 24px;
+  display:flex; align-items:center; gap:16px; padding:20px 24px 20px 24px;
   transition:background .15s ease;
 }
 details.pb-co-card > summary::-webkit-details-marker{ display:none; }
@@ -382,49 +383,23 @@ details.pb-co-card[open] > summary .pb-co-toggle .pb-ico-minus{ display:inline-f
 .pb-co-last:empty { display: none; }
 .pb-co-right{ display:flex; align-items:center; gap:8px; margin-left:auto; }
 
-/* Company row with overlaid refresh button.
-   Right column is made absolute so button overlays the card header (inside visual card, top-right).
-   Uses layout from docs + absolute positioning on column to solve nesting/flow issues with unsafe HTML + widgets.
- */
-.pb-company-row {
-  position: relative;
-}
-.pb-company-row > div[data-testid="stHorizontalBlock"] {
-  position: relative;
-}
-.pb-company-row > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:first-child {
-  width: 100% !important;
-}
-.pb-company-row > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child {
-  position: absolute !important;
-  top: 10px;
-  right: 28px;
-  z-index: 30;
-  width: 16px !important;
-  min-width: 0 !important;
-  padding: 0 !important;
-  margin: 0 !important;
-}
-.pb-company-row > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child div[data-testid="stButton"] {
-  width: auto !important;
-  margin: 0 !important;
-}
-.pb-company-row div[data-testid="stButton"] button {
-  font-size: 6px !important;
-  padding: 0 !important;
-  min-height: 10px !important;
-  min-width: 10px !important;
-  height: 10px !important;
-  line-height: 1 !important;
-  border-radius: 1px !important;
+/* Refresh (retry) button is placed in a narrow right column next to the card
+   (columns used here for reliable top-right positioning without tag leakage). */
+div[data-testid="stButton"] button[title*="Refresh this company"] {
+  font-size: 10px !important;
+  padding: 1px 5px !important;
+  min-height: 18px !important;
+  border-radius: 3px !important;
   box-shadow: none !important;
   border: 1px solid var(--line-200) !important;
   background: var(--card-bg) !important;
-  transform: scale(0.65) !important;
-  transform-origin: center !important;
 }
-.pb-company-row div[data-testid="stButton"] button[kind="secondary"] {
-  font-size: 6px !important;
+
+/* Pull the narrow right column (containing refresh) slightly left so it sits
+   visually on the card rather than creating a gap. */
+div[data-testid="column"]:has(button[title*="Refresh this company"]) {
+  margin-left: -12px !important;
+  min-width: 28px !important;
 }
 
 /* Indicator rows */
@@ -509,7 +484,7 @@ details.pb-row[open] > summary .pb-row-toggle .pb-ico-minus{ display:inline-flex
   min-height: 36px;
 }
 
-/* Compact action button in add widget (proportionally smaller, HSBC style) */
+/* Compact action button in add widget (the conditional +Add/-Remove that appears) */
 .pb-add-widget div[data-testid="stButton"] button {
   font-size: 11px !important;
   padding: 3px 8px !important;
@@ -1101,6 +1076,40 @@ def render_portfolio_overview(stats: PortfolioStats) -> None:
 # ---------------------------------------------------------------------------
 
 
+def render_removing_company_card(
+    name: str,
+    ticker: str,
+) -> None:
+    """Card shown while a company is being removed. Faded with removing icon.
+    Gives visual feedback instead of the whole page flashing white.
+    """
+    html = f"""
+<details class="pb-co-card" open style="opacity: 0.5; filter: grayscale(0.3);">
+  <summary>
+    <div class="pb-co-score" style="background:rgba(220,38,38,0.1);color:#dc2626">—</div>
+    <div class="pb-co-titles">
+      <div class="pb-co-name">{_esc(name)}</div>
+      <div class="pb-co-meta">
+        <span class="pb-pill" style="background:rgba(220,38,38,0.15);color:#dc2626;border:1px solid rgba(220,38,38,0.3);">removing</span>
+        <span class="pb-co-ticker">{_esc(ticker or "")}</span>
+      </div>
+    </div>
+    <div class="pb-co-right">
+      <div class="pb-co-comp">
+        <div class="pb-co-comp-num" style="color:#dc2626">—</div>
+        <div class="pb-co-comp-lbl">removing…</div>
+      </div>
+    </div>
+  </summary>
+  <div class="pb-rows" style="padding:32px 24px; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#9FA1A4; font-size:13px; min-height:60px;">
+    <div style="font-size:22px; margin-bottom:6px;">🗑️</div>
+    <div>Removing company...</div>
+  </div>
+</details>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+
 def _row_html(
     indicator_id: str,
     label: str,
@@ -1125,9 +1134,9 @@ def _row_html(
             'style="background:rgba(245,158,11,.15);color:#B45309;border:1px solid rgba(245,158,11,.30);">key</span>'
         )
 
-    mid = f'<span><span class="pb-row-val">{_esc(result.value)}</span>{badges}</span>'
+    mid = f'<span><span class="pb-row-val">{_esc(result.value)}</span> {badges}</span>'
 
-    if result.status == "unavailable":
+    if result.status in ("unavailable", "demo"):
         bar = ""
         num = ""
     else:
@@ -1185,7 +1194,6 @@ def render_company_card(
     composite: float,
     status: str,
     rows: Iterable[tuple[str, str, str, SignalResult]],
-    sources: Iterable[str],
     last_update: str | None = None,
     *,
     anchor_id: str | None = None,
@@ -1215,8 +1223,16 @@ def render_company_card(
     else:
         last_html = '<div class="pb-co-last"></div>'
 
+    # Always render full indicator list (including demo/"no data found" for newly added or partial companies)
     body_rows = "".join(_row_html(iid, lbl, desc, result) for iid, lbl, desc, result in rows)
-    srcs = [s for s in sources if s]
+    # Collect sources from all rows (now including demo) so newly added companies
+    # show the full set of configured indicators/sources even before data lands.
+    seen: set[str] = set()
+    for _iid, _lbl, _desc, result in rows:
+        for s in getattr(result, "source_ids", ()):
+            if s:
+                seen.add(s)
+    srcs = sorted(seen)
     src_html = ""
     if srcs:
         chips = " ".join(
@@ -1230,32 +1246,80 @@ def render_company_card(
 
     details_id = f' id="pb-co-{anchor_id}"' if anchor_id else ""
     html = f"""
-    <details class="pb-co-card"{details_id}>
-      <summary>
-        <div class="pb-co-score" style="background:{tok["bg"]};color:{fg}">{composite:.0f}</div>
-        <div class="pb-co-titles">
-          <div class="pb-co-name">{_esc(name)}</div>
-          <div class="pb-co-meta">
-            <span class="pb-pill" style="background:{tok["bg"]};color:{tok["fg"]};border:1px solid {tok["bd"]}">{status}</span>
-            <span class="pb-co-ticker">{_esc(ticker or "")}</span>
-            <span style="color:var(--ink-400);">\u00b7</span>
-            <span>{sector_pretty}</span>
-          </div>
-        </div>
-        <div class="pb-co-right">
-          <div class="pb-co-comp">
-            <div class="pb-co-comp-num" style="color:{fg}">{composite:.0f}</div>
-            <div class="pb-co-comp-lbl">composite / 100</div>
-            {last_html}
-          </div>
-          <span class="pb-co-toggle"><span class="pb-ico-plus">{ic_plus(18)}</span><span class="pb-ico-minus">{ic_minus(18)}</span></span>
-        </div>
-      </summary>
-      <div class="pb-rows">{body_rows}</div>
-      {src_html}
-    </details>
+<details class="pb-co-card"{details_id}>
+  <summary>
+    <div class="pb-co-score" style="background:{tok["bg"]};color:{fg}">{composite:.0f}</div>
+    <div class="pb-co-titles">
+      <div class="pb-co-name">{_esc(name)}</div>
+      <div class="pb-co-meta">
+        <span class="pb-pill" style="background:{tok["bg"]};color:{tok["fg"]};border:1px solid {tok["bd"]}">{status}</span>
+        <span class="pb-co-ticker">{_esc(ticker or "")}</span>
+        <span style="color:var(--ink-400);">\u00b7</span>
+        <span>{sector_pretty}</span>
+      </div>
+    </div>
+    <div class="pb-co-right">
+      <div class="pb-co-comp">
+        <div class="pb-co-comp-num" style="color:{fg}">{composite:.0f}</div>
+        <div class="pb-co-comp-lbl">composite / 100</div>
+        {last_html}
+      </div>
+      <span class="pb-co-toggle"><span class="pb-ico-plus">{ic_plus(18)}</span><span class="pb-ico-minus">{ic_minus(18)}</span></span>
+    </div>
+  </summary>
+  {f'<div class="pb-rows">{body_rows}</div>' if body_rows else ""}
+  {src_html}
+</details>
+"""
+    import textwrap
+
+    html = textwrap.dedent(html).strip()
+    html = html.replace("currentColor", "#9FA1A4")
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def render_loading_company_card(
+    name: str,
+    sector: str,  # noqa: ARG001 - kept for call-site compatibility
+    ticker: str,
+) -> None:
+    """Minimal empty card with spinning loader shown immediately when a company
+    is added. The card stays "empty" (no data/rows) with a loading icon until
+    the background fetch completes and real data populates it.
     """
-    # Replace any remaining currentColor (toggles, info icons etc.) with a visible gray
+    html = f"""
+<details class="pb-co-card" open>
+  <summary>
+    <div class="pb-co-score" style="background:rgba(159,161,164,0.08);color:#9FA1A4">—</div>
+    <div class="pb-co-titles">
+      <div class="pb-co-name">{_esc(name)}</div>
+      <div class="pb-co-meta">
+        <span class="pb-pill" style="background:rgba(159,161,164,.08);color:#9FA1A4;border:1px solid rgba(159,161,164,.18);">loading</span>
+        <span class="pb-co-ticker">{_esc(ticker or "")}</span>
+      </div>
+    </div>
+    <div class="pb-co-right">
+      <div class="pb-co-comp">
+        <div class="pb-co-comp-num" style="color:#9FA1A4">—</div>
+        <div class="pb-co-comp-lbl">loading…</div>
+      </div>
+    </div>
+  </summary>
+  <div class="pb-rows" style="padding:40px 24px; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#9FA1A4; font-size:13px; min-height:80px;">
+    <div style="
+      width:28px; height:28px; border:3px solid rgba(159,161,164,0.2);
+      border-top-color:#9FA1A4; border-radius:50%;
+      animation: pb-spin 0.8s linear infinite; margin-bottom:10px;
+    "></div>
+    <div>Fetching data…</div>
+  </div>
+</details>
+<style>
+@keyframes pb-spin {{
+  to {{ transform: rotate(360deg); }}
+}}
+</style>
+    """
     html = html.replace("currentColor", "#9FA1A4")
     st.markdown(html, unsafe_allow_html=True)
 

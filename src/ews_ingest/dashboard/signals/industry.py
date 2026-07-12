@@ -20,7 +20,9 @@ from ews_ingest.dashboard.signals import (
     SignalResult,
     cast_status,
     demo_result,
+    has_rate_limit_record,
     ok_result,
+    rate_limited_result,
     register_provider,
 )
 
@@ -79,7 +81,10 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
 
     filer_payloads: list[dict[str, object]] = []
     if filer_sid:
-        for rec in ctx.landing.read(filer_sid).records:
+        filer_records = ctx.landing.read(filer_sid).records
+        if has_rate_limit_record(filer_records):
+            return rate_limited_result(filer_sid)
+        for rec in filer_records:
             if _matches_entity(rec.entities, company):
                 filer_payloads.append(rec.payload)
 
@@ -131,8 +136,12 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
     corroborations = 1
     if title_from_map:
         corroborations += 1
-    if naics_sid and ctx.landing.read(naics_sid).records:
-        corroborations += 1
+    if naics_sid:
+        naics_recs = ctx.landing.read(naics_sid).records
+        if has_rate_limit_record(naics_recs):
+            return rate_limited_result(naics_sid)
+        if naics_recs:
+            corroborations += 1
     # A non-empty seeded sector counts as a corroboration.
     if company.extra_ids.get("sector"):
         corroborations += 1
