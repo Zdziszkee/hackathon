@@ -116,8 +116,11 @@ class CompanyStore:
         """Drop the company with this ticker (case-insensitive). Returns whether
         a row was actually removed."""
         ticker = ticker.strip().upper()
+        _log.info("remove_ticker called for %s (acquiring lock)", ticker)
         with self._lock:
-            return self._hist.remove_company(ticker)
+            result = self._hist.remove_company(ticker)
+            _log.info("remove_ticker for %s -> %s (released lock)", ticker, result)
+            return result
 
     # --------------------------------------------------------------- helpers
     def _find_in_store(self, ticker: str) -> Identifiers | None:

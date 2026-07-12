@@ -85,6 +85,9 @@ class HttpClient:
         merged = dict(headers or {})
         if "sec.gov" in url:
             merged.setdefault("User-Agent", self._sec_user_agent)
+        elif "yahoo.com" in url or "query1.finance" in url:
+            # Yahoo unofficial APIs often 401 or block without a realistic UA
+            merged.setdefault("User-Agent", "Mozilla/5.0 (compatible; ews-ingest/0.1)")
         return merged
 
     def _sleep(self, policy: RatePolicy, attempt: int) -> None:

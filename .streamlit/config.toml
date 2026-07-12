@@ -1,11 +1,10 @@
+[logger]
+level = "warning"
+messageFormat = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
 [theme]
 base = "light"
 primaryColor = "#DB0011"
 backgroundColor = "#F5F5F5"
 secondaryBackgroundColor = "#FFFFFF"
 textColor = "#1A1A1A"
-font = "sans serif"
-
-[client]
-toolbarMode = "minimal"
-showErrorDetails = false

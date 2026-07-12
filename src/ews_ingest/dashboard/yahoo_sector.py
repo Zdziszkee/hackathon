@@ -113,7 +113,14 @@ def parse_asset_profile(payload: object) -> Identifiers:
 class SecLiveYahooSector:
     """Live Yahoo Finance sector lookup, cached in-memory with no TTL."""
 
-    _POLICY = RatePolicy(host="query1.finance.yahoo.com", rps=2.0, burst=1, retries=3)
+    _POLICY = RatePolicy(
+        host="query1.finance.yahoo.com",
+        rps=2.0,
+        burst=1,
+        retries=1,
+        backoff_base=0.2,
+        backoff_cap=1.0,
+    )
     _BASE_URL = "https://query1.finance.yahoo.com/v10/finance/quoteSummary"
 
     def __init__(self, http: HttpLike) -> None:
@@ -144,16 +151,19 @@ class SecLiveYahooSector:
             payload = self._http.get_json(url, policy=self._POLICY)
         except Exception as exc:
             msg = f"yahoo sector lookup failed for {ticker!r}: {exc}"
+            # Cache the failure (empty) so we don't hammer the endpoint again.
+            empty = Identifiers(ticker=None, name=None, extra_ids={})
+            with self._lock:
+                self._cache[key] = empty
             raise SectorLookupError(msg) from exc
         if not isinstance(payload, dict):
             msg = f"yahoo returned non-dict payload for {ticker!r}"
             raise SectorLookupError(msg)
         result = parse_asset_profile(payload)
-        # Only cache non-empty results so a transient failure re-tries on
-        # the next call.
-        if result.extra_ids:
-            with self._lock:
-                self._cache[key] = result
+        # Cache both success and (empty) failure. Failures (e.g. 401) are
+        # now fast because we avoid repeated slow network roundtrips.
+        with self._lock:
+            self._cache[key] = result
         return result
 
     def invalidate(self, ticker: str | None = None) -> None:

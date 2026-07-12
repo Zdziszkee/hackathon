@@ -115,7 +115,7 @@ def trigger_refresh(ticker: str | None = None, *, blocking: bool = False) -> Non
     def _run() -> None:  # noqa: C901, PLR0912, PLR0915
         services = make_services_from_env()
         hist = make_historical_store()
-        logger.info("trigger_refresh starting for ticker=%s blocking=%s", ticker, blocking)
+        logger.debug("trigger_refresh starting for ticker=%s blocking=%s", ticker, blocking)
         if ticker:
             # only the sources that actually attach to a company
             source_ids = pick_sources(scopes={Scope.PER_ENTITY, Scope.FACILITY})
@@ -244,7 +244,7 @@ def trigger_refresh(ticker: str | None = None, *, blocking: bool = False) -> Non
                         }
                     ],
                 )
-                logger.info(
+                logger.debug(
                     "_refresh_complete marker written for ticker=%s (all sources done)",
                     ticker,
                 )

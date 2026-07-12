@@ -263,6 +263,14 @@ details[data-testid="stExpander"]{
 details[data-testid="stExpander"] summary{ padding:18px 24px !important; font-weight:600 !important; color:var(--ink-900) !important; }
 details[data-testid="stExpander"] [data-testid="stExpanderDetails"]{ padding:0 24px 20px !important; }
 
+/* Force light theme on correlation graph widget (yfiles canvas etc) */
+[data-testid="stExpander"] [data-testid="stCustomComponent"],
+#ews_corr_graph,
+[data-testid="stCustomComponent"] {
+  background: var(--card-bg) !important;
+  color: var(--ink-900) !important;
+}
+
 /* ---- Component classes ---- */
 
 /* Page header — centered, with HSBC logo */
@@ -482,6 +490,18 @@ details.pb-row[open] > summary .pb-row-toggle .pb-ico-minus{ display:inline-flex
 }
 .pb-add-widget .stSelectbox > div[data-baseweb="select"] {
   min-height: 36px;
+  background: var(--card-bg) !important;
+  border: 1px solid var(--line-200) !important;
+  border-radius: var(--radius-input) !important;
+  color: var(--ink-900) !important;
+}
+/* Force light even if Streamlit base is dark (select dropdown, menu, etc) */
+.pb-add-widget .stSelectbox [data-baseweb="select"] *,
+.pb-add-widget .stSelectbox [role="listbox"],
+.pb-add-widget .stSelectbox [data-baseweb="popover"] {
+  background: var(--card-bg) !important;
+  color: var(--ink-900) !important;
+  border-color: var(--line-200) !important;
 }
 
 /* Compact action button in add widget (the conditional +Add/-Remove that appears) */

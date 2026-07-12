@@ -84,7 +84,7 @@ ignore = [
 "src/ews_ingest/cli.py" = ["T201"]
 "src/ews_ingest/__main__.py" = ["T201"]
 "src/ews_ingest/tools/**" = ["T201"]
-"src/ews_ingest/dashboard/app.py" = ["T201", "C901", "PLR2004", "PLC0415", "PLR0912", "PLR0915"]
+"src/ews_ingest/dashboard/app.py" = ["T201", "C901", "PLR2004", "PLC0415", "PLR0912", "PLR0915", "PLR0913"]
 "src/ews_ingest/dashboard/signals/**" = [
     "PLR2004",
     "ANN401",

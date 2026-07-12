@@ -20,6 +20,8 @@ from __future__ import annotations
 import hashlib
 import logging
 import sys
+import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -50,6 +52,40 @@ from ews_ingest.dashboard.ticker_suggest import TickerSuggest
 
 logger = logging.getLogger(__name__)
 
+# Configure early (at import time) so INFO logs from fragments/selects/buttons always appear
+# even on fragment-only reruns.
+logging.getLogger("ews_ingest.dashboard").setLevel(logging.INFO)
+logging.getLogger("streamlit").setLevel(logging.WARNING)
+
+# Save our logs to file (data/dashboard.log) + stdout for visibility
+# This follows Streamlit logging docs: use standard logging + config.toml for internals.
+_log_dir = Path("data")
+_log_dir.mkdir(parents=True, exist_ok=True)
+_log_file = _log_dir / "dashboard.log"
+
+_dash_log = logging.getLogger("ews_ingest.dashboard")
+
+# Add handlers only once (module-level code can run multiple times on reruns/imports)
+if not any(isinstance(h, logging.FileHandler) for h in _dash_log.handlers):
+    _file_handler = logging.FileHandler(_log_file, mode="a")
+    _file_handler.setLevel(logging.INFO)
+    _file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    _dash_log.addHandler(_file_handler)
+
+if not any(isinstance(h, logging.StreamHandler) for h in _dash_log.handlers):
+    _console_handler = logging.StreamHandler(sys.stdout)
+    _console_handler.setLevel(logging.INFO)
+    fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    _console_handler.setFormatter(logging.Formatter(fmt))
+    _dash_log.addHandler(_console_handler)
+
+_dash_log.propagate = False
+
+# Thread-safe communication from background workers to main script thread.
+# Workers must NEVER touch st.session_state or any st.* (causes "missing ScriptRunContext").
+_mutation_lock = threading.Lock()
+_completed_mutations: dict[str, dict[str, object]] = {}
+
 __all__ = [
     "main",
     "portfolio_stats",
@@ -63,6 +99,32 @@ _portfolio_stats = portfolio_stats
 # ---------------------------------------------------------------------------
 # Correlation graph (placeholder hardcoded data)
 # ---------------------------------------------------------------------------
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def _fetch_graph_returns(tickers: tuple[str, ...]) -> dict[str, Any]:
+    """Cached yfinance 10y close returns for the correlation graph."""
+    import pandas as pd
+    import yfinance as yf
+
+    if not tickers:
+        return {}
+    try:
+        hist = yf.download(list(tickers), period="10y", progress=False, auto_adjust=True)["Close"]
+        if isinstance(hist, pd.Series):
+            hist = hist.to_frame()
+        rets = hist.pct_change().dropna(how="all")
+        out: dict[str, pd.Series] = {}
+        for t in tickers:
+            if t in rets.columns:
+                s = rets[t].dropna()
+                if len(s) > 60:
+                    out[t] = s
+    except Exception as exc:
+        logging.getLogger(__name__).warning("yfinance fetch failed: %s", exc)
+        return {}
+    else:
+        return out
 
 
 def _render_correlation_graph(computed: list[CompanyResult]) -> None:
@@ -85,24 +147,12 @@ def _render_correlation_graph(computed: list[CompanyResult]) -> None:
 
     # Fetch historical returns for Granger causality (MVP: yfinance; replace
     # with your landed price/earnings surprise series in production).
-    import pandas as pd
-    import yfinance as yf
+    # (heavy fetch is now @st.cache_data inside _fetch_graph_returns)
 
-    returns: dict[str, pd.Series] = {}
+    returns: dict[str, Any] = {}
     tickers = [c.ticker for c in companies_graph]
     if tickers:
-        try:
-            hist = yf.download(tickers, period="10y", progress=False, auto_adjust=True)["Close"]
-            if isinstance(hist, pd.Series):
-                hist = hist.to_frame()
-            rets = hist.pct_change().dropna(how="all")
-            for t in tickers:
-                if t in rets.columns:
-                    s = rets[t].dropna()
-                    if len(s) > 60:
-                        returns[t] = s
-        except Exception as exc:
-            logging.getLogger(__name__).warning("yfinance fetch failed: %s", exc)
+        returns = _fetch_graph_returns(tuple(tickers))
 
     # Try Granger causality first; fall back to sector/score heuristic
     # if no returns data or no significant edges were found.
@@ -141,12 +191,13 @@ def _ensure_data_for_new_companies(companies: list[Company], hist: HistoricalSto
         if hist.get_last_update(tkr):
             continue
         # No data for this ticker in the DB yet — trigger background fetch.
+        start = datetime.now(UTC).isoformat()
         try:
             trigger_refresh(tkr, blocking=False)
         except Exception as exc:
             logging.getLogger(__name__).warning("auto-refresh failed for %s: %s", tkr, exc)
             continue
-        pending[tkr] = True
+        pending[tkr] = start
         newly_fetched.append(tkr)
 
     if newly_fetched:
@@ -184,11 +235,82 @@ def _start_company_refresh(ticker: str) -> None:
     Used from refresh buttons so we can show loading state without full page white flash.
     Toast via flag (displayed in fragment body).
     """
+    logger.info("_start_company_refresh called for ticker=%s", ticker)
     start = datetime.now(UTC).isoformat()
     st.session_state.setdefault("pending_refreshes", {})[ticker] = start
-    logger.info("starting refresh for ticker=%s via button", ticker)
+    logger.info(
+        "starting refresh for ticker=%s via button (setting pending, spawning fetch)",
+        ticker,
+    )
     trigger_refresh(ticker, blocking=False)
     st.session_state["_toast"] = (f"Refreshing {ticker}…", "⏳")
+    logger.info("refresh dispatched for %s, pending set, will full-rerun to activate poll", ticker)
+
+
+def _start_company_mutation(ticker: str, *, is_remove: bool) -> None:
+    tkr = ticker.strip().upper()
+    if is_remove:
+        logger.info("starting threaded mutation for REMOVE ticker=%s", tkr)
+    else:
+        logger.info("starting threaded mutation for ADD ticker=%s", tkr)
+
+    def _worker() -> None:
+        logger.info("worker thread starting for %s", tkr)
+        try:
+            _, _, _, store, _ = get_inputs()
+            if is_remove:
+                removed = store.remove_ticker(tkr)
+                bust_inputs_cache()
+                with _mutation_lock:
+                    _completed_mutations[tkr] = {
+                        "action": "remove",
+                        "ticker": tkr,
+                        "success": bool(removed),
+                    }
+            else:
+                added = store.add_ticker(tkr)
+                logger.info("add_ticker succeeded for %s, busting cache", tkr)
+                bust_inputs_cache()
+                start = datetime.now(UTC).isoformat()
+                trigger_refresh(added.ticker, blocking=False)
+                with _mutation_lock:
+                    _completed_mutations[tkr] = {
+                        "action": "add",
+                        "ticker": added.ticker,
+                        "start": start,
+                        "success": True,
+                    }
+            label = "REMOVE" if is_remove else "ADD"
+            logger.info("worker enqueued completion for %s %s", label, tkr)
+        except TickerResolutionError as exc:
+            logger.info("resolution error for %s: %s", tkr, exc)
+            with _mutation_lock:
+                _completed_mutations[tkr] = {
+                    "action": "add" if not is_remove else "remove",
+                    "ticker": tkr,
+                    "success": False,
+                    "error": f"Could not resolve {tkr!r}: {exc}",
+                }
+        except Exception as exc:
+            logger.exception("mutation worker failed for %s", tkr)
+            with _mutation_lock:
+                _completed_mutations[tkr] = {
+                    "action": "add" if not is_remove else "remove",
+                    "ticker": tkr,
+                    "success": False,
+                    "error": f"Action failed for {tkr}: {exc}",
+                }
+        logger.info("worker finished for %s", tkr)
+
+    if is_remove:
+        removing = st.session_state.setdefault("removing_tickers", set())
+        removing.add(tkr)
+        logger.info("spawned worker thread for REMOVE %s, removing set (main thread)", tkr)
+    else:
+        resolving = st.session_state.setdefault("resolving_tickers", set())
+        resolving.add(tkr)
+        logger.info("spawned worker thread for ADD %s, resolving set (main thread)", tkr)
+    threading.Thread(target=_worker, daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +325,13 @@ def main() -> None:
         render_topbar,
     )
 
+    logger.info("main() entry — full script run starting (this is what can feel like freeze)")
+
+    # Ensure our info logs are emitted when streamlit is started with --logger.level=info
+    logging.getLogger("ews_ingest.dashboard").setLevel(logging.INFO)
+    # Suppress noisy streamlit internals so our INFO logs are easier to see
+    logging.getLogger("streamlit").setLevel(logging.WARNING)
+
     st.set_page_config(
         page_title="Premier Bank",
         page_icon="🛡️",
@@ -214,7 +343,9 @@ def main() -> None:
     # Legacy queued processing (kept for backward compat with any stale flags).
     _process_queued_mutation()
 
+    logger.info("main: before get_inputs")
     companies, landing, env, _store, suggest = get_inputs()
+    logger.info("main: got %d companies from get_inputs", len(companies))
     hist = make_historical_store()
 
     providers = list_providers()
@@ -247,6 +378,10 @@ def main() -> None:
         return [(company, *compute_company(company, providers, ctx)) for company in companies]
 
     computed: list[CompanyResult] = _compute(fp)
+    logger.info(
+        "outer _compute done for %d companies (graph/portfolio will use this)",
+        len(computed),
+    )
 
     # --- Auto-fetch for companies added without data ---
     # If a company was added without its per-entity sources ever being run,
@@ -263,35 +398,45 @@ def main() -> None:
     render_portfolio_overview(stats)
 
     # --- Company correlation graph (always expanded) ---
-    if computed:
-        with st.expander("Correlation graph", expanded=True):
-            _render_correlation_graph(computed)
+    # Wrapped so that graph errors (yfinance, widget, etc.) don't kill the entire page
+    # and hide the companies section.
+    try:
+        if computed:
+            with st.expander("Correlation graph", expanded=True):
+                _render_correlation_graph(computed)
+    except Exception as exc:
+        logger.info("correlation graph rendering failed (non-fatal): %s", exc)
+        st.caption("⚠️ Correlation graph unavailable")
     st.caption(
         "Historical data served from SQLite DB (data/ews.db). "
         "Indicators from landed records fed by sources."
     )
     st.divider()
 
-    run_every = 5  # poll companies section (smooth loading resolution + live updates)
+    st.caption("🔧 DEBUG: reached companies section definition (after graph)")
+
+    # Poll the companies fragment only while refreshes are pending.
+    # This keeps background activity (script reruns + file watchers) low when idle.
+    # When pending becomes empty we force a full rerun so the next @st.fragment
+    # definition uses run_every=None (no auto-poll).
+    pending_now = st.session_state.get("pending_refreshes", {}) or {}
+    run_every = 5 if pending_now else None
 
     @st.fragment(run_every=run_every)
     def _companies_section(suggest: TickerSuggest) -> None:
         """Companies add/search + cards list in a single fragment.
 
-        Live selectbox (picking does nothing).
-        Conditional button (+ Add / - Remove) appears only after selection.
-        Action only on button click; then full rerun so graph + overview + topbar
-        update with the new company set.
+        Per-company refresh/add/remove are handled via background threads +
+        fragment-scoped updates where possible so only the concerned company
+        card is affected during the operation. Full rerun only to (de)activate
+        polling or after structural list changes for the graph/overview.
         """
+        logger.info("_companies_section ENTER (fragment body running)")
         # Fresh companies from SQLite DB (instant on open/restart).
-        # Use outer computed for indicators; new ones show basic card until full update.
         fresh_companies, landing_f, _env_f, _store_f, _ = get_inputs()
+        logger.info("_companies_section after first get_inputs: %d companies", len(fresh_companies))
+        st.caption(f"🔧 DEBUG fragment: after first fetch | companies={len(fresh_companies)}")
         hist_f = make_historical_store()
-
-        # Build lookup from outer (stable) computed
-        results_lookup: dict[str, tuple[list[Any], float, int]] = {}
-        for c, res, comp, fl in computed:
-            results_lookup[(c.ticker or "").upper()] = (res, comp, fl)
 
         current_tickers = {(c.ticker or "").upper() for c in fresh_companies if c.ticker}
 
@@ -302,18 +447,115 @@ def main() -> None:
             _render_add_company_form(suggest, current_tickers)
 
         # Re-fetch companies (lightweight) so the cards section always sees the
-        # latest persisted list from DB.
+        # latest persisted list from DB. Compute indicators *inside the fragment*
+        # so refreshes for one ticker update only the concerned card (light
+        # fragment rerun) without forcing outer graph/stats recompute.
         fresh_companies, landing_f, _env_f, _store_f, _ = get_inputs()
         hist_f = make_historical_store()
         current_tickers = {(c.ticker or "").upper() for c in fresh_companies if c.ticker}
+        for key in ("resolving_tickers", "removing_tickers"):
+            ss_set = st.session_state.get(key) or set()
+            if ss_set:
+                st.session_state[key] = ss_set & current_tickers
+        update_ts = time.time()
+        tickers = [c.ticker for c in fresh_companies]
+        logger.info(
+            "DASHBOARD ACTUALLY UPDATED: companies=%d %s at ts=%.3f",
+            len(fresh_companies),
+            tickers,
+            update_ts,
+        )
 
-        # pending for this render (clear after so this render can show loading states)
         pending = st.session_state.setdefault("pending_refreshes", {})
-        logger.debug(
-            "rendering companies section; fresh=%d pending=%s",
+        resolving = st.session_state.get("resolving_tickers", set()) or set()
+        removing = st.session_state.get("removing_tickers", set()) or set()
+        had_pending = bool(pending)
+
+        # Process any completions from background workers (SAFE: this is main thread)
+        with _mutation_lock:
+            for orig_tkr in list(_completed_mutations.keys()):
+                info = _completed_mutations.pop(orig_tkr, {})
+                logger.info("processing completed mutation: %s", info)
+                tkr = info.get("ticker", orig_tkr)
+                if info.get("success"):
+                    if info.get("action") == "add":
+                        start = info.get("start") or datetime.now(UTC).isoformat()
+                        st.session_state.setdefault("pending_refreshes", {})[tkr] = start
+                        st.session_state["_toast"] = (f"Added {tkr}. Fetching data…", "⏳")
+                        st.session_state["_force_full_rerun"] = True
+                        logger.info(
+                            "applied add completion for %s "
+                            "(set pending + toast + force) *** will reflect on next update ***",
+                            tkr,
+                        )
+                    elif info.get("action") == "remove":
+                        st.session_state["_toast"] = (f"Removed {tkr}", "🗑️")
+                        st.session_state["_force_full_rerun"] = True
+                else:
+                    st.session_state["_last_error"] = info.get("error", f"Unknown error for {tkr}")
+                    logger.info("applied error from mutation for %s", tkr)
+                resolving.discard(orig_tkr)
+                resolving.discard(tkr)
+                removing = st.session_state.get("removing_tickers", set()) or set()
+                removing.discard(orig_tkr)
+                removing.discard(tkr)
+                st.session_state["removing_tickers"] = removing
+                logger.info("*** MUTATION PROCESSED in main, next render shows updated list ***")
+
+        if st.session_state.pop("_force_full_rerun", False):
+            logger.info("force_full_rerun flag seen — triggering full app rerun")
+            st.rerun()
+
+        # refresh sets after possible process clears
+        pending = st.session_state.setdefault("pending_refreshes", {})
+        resolving = st.session_state.get("resolving_tickers", set()) or set()
+        removing = st.session_state.get("removing_tickers", set()) or set()
+        had_pending = bool(pending) or had_pending
+
+        last_res = st.session_state.get("_last_results_lookup") or {}
+        results_lookup: dict[str, tuple[list[Any], float, int]] = last_res.copy()
+        active_mut = set(pending.keys()) | resolving | removing
+        to_compute: list[Any] = []
+        for company in fresh_companies:
+            t = (company.ticker or "").upper()
+            if t in active_mut:
+                if t not in results_lookup:
+                    results_lookup[t] = ([], 0.0, 0)
+                continue
+            if t in results_lookup:
+                continue
+            to_compute.append(company)
+        if to_compute:
+            providers_f = list_providers()
+            ctx_f = make_signal_ctx(landing_f, _env_f, historical=hist_f)
+            logger.info("computing indicators inside fragment (on demand) for %d", len(to_compute))
+            for company in to_compute:
+                t = (company.ticker or "").upper()
+                try:
+                    res, comp, fl = compute_company(company, providers_f, ctx_f)
+                except Exception:
+                    res, comp, fl = [], 0.0, 0
+                results_lookup[t] = (res, comp, fl)
+            logger.info("finished inside-fragment indicator compute (partial)")
+        else:
+            logger.info("reused cached indicator results for fragment render")
+        st.session_state["_last_results_lookup"] = {
+            k: v for k, v in results_lookup.items() if k in current_tickers
+        }
+
+        logger.info(
+            "companies fragment render start: n=%d pending=%s resolving=%s removing=%s",
             len(fresh_companies),
             list(pending.keys()),
+            list(resolving),
+            list(removing),
         )
+
+        # Surface any background error from threaded mutation (non-fatal).
+        if "_last_error" in st.session_state:
+            err = st.session_state.pop("_last_error")
+            logger.info("showing last_error: %s", err)
+            st.error(err)
 
         if not fresh_companies:
             st.info(
@@ -326,6 +568,7 @@ def main() -> None:
                 hist_f,
                 landing_f,
                 pending,
+                removing,
                 results_lookup=results_lookup,
             )
 
@@ -340,17 +583,23 @@ def main() -> None:
                     start = "0"  # legacy bool/float
                 last_complete = hist_f.get_last_update(tkr, "_refresh_complete")
                 if last_complete and last_complete > start:
-                    logger.info(
+                    logger.debug(
                         "clearing pending for %s (complete at %s > start %s)",
                         tkr,
                         last_complete,
                         start,
                     )
                     pending.pop(tkr, None)
+                    (st.session_state.get("_last_results_lookup") or {}).pop(tkr, None)
         if pending:
             st.caption(
                 "⏳ Background DB refresh(s) running for: " + ", ".join(sorted(pending.keys()))
             )
+        elif had_pending:
+            # We just cleared the final pending entry (either in cards or here).
+            # Force a full app rerun so outer code re-defines @st.fragment
+            # with run_every=None (stopping the background polling).
+            st.rerun(scope="app")
 
         # Display any toast scheduled during this run (from add/remove or refresh buttons).
         # Must be in fragment body.
@@ -366,6 +615,7 @@ def _render_company_cards(
     hist: HistoricalStore | None = None,
     landing: LandingReader | None = None,
     pending: dict[str, str] | None = None,
+    removing: set[str] | None = None,
     *,
     results_lookup: dict[str, tuple[list[object], float, int]] | None = None,
 ) -> None:
@@ -378,9 +628,11 @@ def _render_company_cards(
     from ews_ingest.dashboard.ui import (
         render_company_card,
         render_loading_company_card,
+        render_removing_company_card,
     )
 
     pending = pending or {}
+    removing = removing or set()
     results_lookup = results_lookup or {}
 
     focus_ticker = st.session_state.pop("focus_company", None)
@@ -412,8 +664,11 @@ def _render_company_cards(
             ticker in pending,
         )
 
-        # include demo/"no data" rows so newly added companies show full indicator list
         real_results = list(results)
+
+        if ticker in removing:
+            render_removing_company_card(company.name, ticker)
+            continue
 
         if ticker in pending:
             # Show loading until the _refresh_complete marker (written after ALL
@@ -426,6 +681,7 @@ def _render_company_cards(
             last_complete = hist.get_last_update(ticker, "_refresh_complete") if hist else None
             if last_complete and last_complete > start:
                 pending.pop(ticker, None)
+                (st.session_state.get("_last_results_lookup") or {}).pop(ticker, None)
                 logger.debug("switching %s from loading to real card (complete marker)", ticker)
             else:
                 render_loading_company_card(
@@ -462,10 +718,13 @@ def _render_company_cards(
                 help="Refresh this company",
                 use_container_width=False,
                 width="content",
-                on_click=_start_company_refresh,
-                args=(ticker,),
             ):
-                pass  # on_click handles marking + triggering
+                logger.info("refresh button clicked for ticker=%s (inside cards)", ticker)
+                _start_company_refresh(ticker)
+                # Full rerun to activate conditional polling (run_every) for this
+                # ticker's pending state. Fragment polls will update only this card.
+                logger.info("about to rerun after refresh click for %s", ticker)
+                st.rerun()
 
     if focus_ticker and scroll_key and not st.session_state.get(scroll_key):
         import streamlit.components.v1 as _st_v1
@@ -497,18 +756,27 @@ def _render_add_company_form(
     are live; use button for the actual mutation to avoid accidental triggers).
     """
     current_tickers = current_tickers or set()
+    logger.info("_render_add_company_form ENTER: current_tickers=%s", sorted(current_tickers))
 
-    # Build full list of options (cached by suggest).
-    options: list[str] = []
-    try:
-        matches = suggest.suggest("", limit=99999)
-        for m in matches:
-            if m.ticker:
-                label = f"{m.ticker} — {m.name}" if m.name else m.ticker
-                options.append(label)
-    except Exception as exc:
-        st.caption(f"Autocomplete list unavailable: {exc}")
-        options = []
+    # Build full list of options (cached by suggest + st.cache for widget perf).
+    # Huge option list (10k+) rebuilt on every fragment interaction was a source
+    # of lag in add/remove.
+    @st.cache_data(show_spinner=False, ttl=300)
+    def _build_options() -> list[str]:
+        try:
+            matches = suggest.suggest("", limit=99999)
+            opts: list[str] = []
+            for m in matches:
+                if m.ticker:
+                    label = f"{m.ticker} — {m.name}" if m.name else m.ticker
+                    opts.append(label)
+        except Exception:
+            return []
+        else:
+            return opts
+
+    options: list[str] = _build_options()
+    logger.info("using %d options for selectbox (from cache)", len(options))
 
     st.markdown('<div class="pb-add-widget">', unsafe_allow_html=True)
 
@@ -522,53 +790,63 @@ def _render_add_company_form(
         key="company_native_select",
         width=260,
     )
+    logger.info("selectbox value after render: %r", selected)
 
     if selected:
         ticker = selected.split(" — ")[0].strip().upper()
         is_present = ticker in current_tickers
+        resolving = st.session_state.get("resolving_tickers", set()) or set()
+        removing = st.session_state.get("removing_tickers", set()) or set()
+        is_busy = ticker in resolving or ticker in removing
+
+        logger.info(
+            "selectbox selected ticker=%s is_present=%s is_busy=%s",
+            ticker,
+            is_present,
+            is_busy,
+        )
+
         action = "Remove" if is_present else "Add"
         label = f"{'-' if is_present else '+'} {action} {ticker}"
         help_text = f"{'Remove' if is_present else 'Add'} {ticker} from the dashboard"
 
-        st.caption(f"Press the button to {action.lower()} {ticker}")
+        if is_busy:
+            verb = "Resolving / updating" if ticker in resolving else "Removing"
+            st.caption(f"⏳ {verb} {ticker}… (non-blocking)")
+            logger.info("showing busy state for %s", ticker)
+        else:
+            st.caption(f"Press the button to {action.lower()} {ticker}")
 
-        if st.button(
-            label,
-            key="company_action_btn",
-            help=help_text,
-            type="primary" if not is_present else "secondary",
-            width="content",
-        ):
-            if is_present:
-                try:
-                    _, _, _, temp_store, _ = get_inputs()
-                    if temp_store.remove_ticker(ticker):
-                        bust_inputs_cache()
-                        st.session_state["_toast"] = (f"Removed {ticker}", "🗑️")
-                except Exception as exc:
-                    st.error(f"Remove failed: {exc}")
-            else:
-                try:
-                    _, _, _, temp_store, _ = get_inputs()
-                    added = temp_store.add_ticker(ticker)
-                    bust_inputs_cache()
-                    start = datetime.now(UTC).isoformat()
-                    st.session_state.setdefault("pending_refreshes", {})[added.ticker] = start
-                    trigger_refresh(added.ticker, blocking=False)
-                    st.session_state["_toast"] = (f"Added {added.ticker}. Fetching...", "⏳")
-                except TickerResolutionError as exc:
-                    st.error(f"Could not resolve {ticker!r}: {exc}")
-                except Exception as exc:
-                    st.error(f"Action failed: {exc}")
+            if st.button(
+                label,
+                key=f"company_action_btn_{ticker}",
+                help=help_text,
+                type="primary" if not is_present else "secondary",
+                width="content",
+                disabled=is_busy,
+            ):
+                click_ts = time.time()
+                logger.info(
+                    "*** BUTTON CLICK: ticker=%s present=%s (remove=%s) ts=%.3f ***",
+                    ticker,
+                    is_present,
+                    is_present,
+                    click_ts,
+                )
+                if "company_native_select" in st.session_state:
+                    st.session_state.pop("company_native_select", None)
+                    logger.info("cleared select key after click")
 
-            # Clear the select so it resets for next use
-            if "company_native_select" in st.session_state:
-                st.session_state.pop("company_native_select", None)
-
-            # Structural change: force full rerun so that topbar count, portfolio overview,
-            # and especially the correlation graph (which is built from the outer `computed`)
-            # pick up the new/removed company immediately.
-            st.rerun()
+                if is_present:
+                    logger.info("*** EXECUTING REMOVE for %s (threaded) ***", ticker)
+                    _start_company_mutation(ticker, is_remove=True)
+                    logger.info("*** REMOVE started, about to rerun ***")
+                    st.rerun(scope="fragment")
+                else:
+                    logger.info("*** EXECUTING ADD for %s (threaded) ***", ticker)
+                    _start_company_mutation(ticker, is_remove=False)
+                    logger.info("*** ADD started, about to rerun ***")
+                    st.rerun()
 
     st.markdown("</div>", unsafe_allow_html=True)
 
