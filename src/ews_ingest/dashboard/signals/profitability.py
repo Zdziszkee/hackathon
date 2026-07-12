@@ -224,6 +224,7 @@ class _Provider:
 
     description = "Net income margin from SEC XBRL companyfacts (NetIncomeLoss / Revenues). Higher means healthier."
     roles: tuple[str, ...] = (ROLE,)
+    weight: float = 0.12
 
     def compute(self, company: Identifiers, ctx: SignalContext) -> SignalResult:
         return compute(company, ctx)

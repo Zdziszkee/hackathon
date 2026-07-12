@@ -142,6 +142,7 @@ class _Provider:
 
     description = "Country of primary operations and confidence in that assignment. Multi-country exposure lowers confidence."
     roles: tuple[str, ...] = (ROLE,)
+    weight: float = 0.04
 
     def compute(self, company: Identifiers, ctx: SignalContext) -> SignalResult:
         return compute(company, ctx)

@@ -133,6 +133,7 @@ class _Provider:
         "scale (50 = neutral). Above 50 means expansion, below 50 means contraction."
     )
     roles: tuple[str, ...] = (ROLE,)
+    weight: float = 0.08
 
     def compute(self, company: Identifiers, ctx: SignalContext) -> SignalResult:
         return compute(company, ctx)

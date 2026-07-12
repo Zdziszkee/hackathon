@@ -60,7 +60,7 @@ __all__ = [
     "ticker_in_flight",
 ]
 
-# Batch size for in-flight record flushing — matches the CLI's BATCH.
+# Batch size for in-flight record flushing.
 _BATCH = 500
 
 _log = logging.getLogger("ews_ingest.dashboard.onboarding")
@@ -135,8 +135,7 @@ class PortfolioOnboarding:
         writer: JsonlLandWriter | None = None,
     ) -> None:
         self._services = services
-        # The ``http`` and ``writer`` overrides let tests inject fakes; the
-        # CLI/dashboard paths reuse the services' own.
+        # Overrides for tests; paths reuse services.
         self._http = http
         self._writer = writer
         self._semaphore_value = concurrency
@@ -145,7 +144,7 @@ class PortfolioOnboarding:
         """Fetch + land every eligible source for ``identifier``.
 
         Returns the :class:`OnboardingTask` once the entire batch is done
-        (synchronous with the call; useful for tests + sync CLI wrappers).
+        (synchronous with the call; useful for tests + sync wrappers).
         """
         sector_label = identifier.extra_ids.get("sector", "")
         eligible = self._eligible_sources(identifier)
@@ -193,7 +192,7 @@ class PortfolioOnboarding:
         return task
 
     def refresh_blocking(self, identifier: Identifiers) -> OnboardingTask:
-        """Sync entry: ``asyncio.run`` the async refresh. Used by the CLI."""
+        """Sync entry: ``asyncio.run`` the async refresh."""
         return asyncio.run(self.refresh_async(identifier))
 
     # -------------------------------------------------------- eligibility
@@ -282,9 +281,11 @@ def build_onboarding(
 
     The ``landing_dir`` override exists for tests.
     """
-    from ews_ingest.cli import _services_from_env  # noqa: PLC0415 - cycle
+    from ews_ingest.dashboard.services import (  # noqa: PLC0415
+        make_services_from_env,
+    )
 
     if landing_dir is not None:
         os.environ["EWS_LANDING_DIR"] = landing_dir
-    services = _services_from_env()
+    services = make_services_from_env()
     return PortfolioOnboarding(services, concurrency=concurrency)

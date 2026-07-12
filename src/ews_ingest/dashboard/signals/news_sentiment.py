@@ -145,6 +145,7 @@ class _Provider:
         "company over the last year. Negative tone = higher risk."
     )
     roles: tuple[str, ...] = (ROLE,)
+    weight: float = 0.07
 
     def compute(self, company: Identifiers, ctx: SignalContext) -> SignalResult:
         return compute(company, ctx)

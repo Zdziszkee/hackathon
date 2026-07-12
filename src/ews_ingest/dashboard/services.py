@@ -85,8 +85,7 @@ def make_env_resolver() -> EnvResolver:
 
 
 def _load_sources(path: Path) -> dict[str, SourceConfig]:
-    # Imported lazily to avoid pulling the full config module into a
-    # tight import chain (it transitively imports the CLI).
+    # Imported lazily to keep import graph clean.
     from ews_ingest.config import load_sources  # noqa: PLC0415
 
     return load_sources(path)

@@ -209,6 +209,7 @@ class _Provider:
         f"insider count = unusual activity around the name."
     )
     roles: tuple[str, ...] = (ROLE,)
+    weight: float = 0.09
 
     def compute(self, company: Identifiers, ctx: SignalContext) -> SignalResult:
         return compute(company, ctx)

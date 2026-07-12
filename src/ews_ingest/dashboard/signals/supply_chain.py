@@ -225,6 +225,7 @@ class _Provider:
 
     description = "Blends NY Fed GSCPI pressure score with ISM New Orders and Supplier Deliveries sub-indices."
     roles: tuple[str, ...] = ROLES
+    weight: float = 0.08
 
     def compute(self, company: Identifiers, ctx: SignalContext) -> SignalResult:
         return compute(company, ctx)

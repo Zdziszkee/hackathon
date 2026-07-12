@@ -391,25 +391,6 @@ details.pb-co-card[open] > summary .pb-co-toggle .pb-ico-minus{ display:inline-f
 .pb-co-last:empty { display: none; }
 .pb-co-right{ display:flex; align-items:center; gap:8px; margin-left:auto; }
 
-/* Refresh (retry) button is placed in a narrow right column next to the card
-   (columns used here for reliable top-right positioning without tag leakage). */
-div[data-testid="stButton"] button[title*="Refresh this company"] {
-  font-size: 10px !important;
-  padding: 1px 5px !important;
-  min-height: 18px !important;
-  border-radius: 3px !important;
-  box-shadow: none !important;
-  border: 1px solid var(--line-200) !important;
-  background: var(--card-bg) !important;
-}
-
-/* Pull the narrow right column (containing refresh) slightly left so it sits
-   visually on the card rather than creating a gap. */
-div[data-testid="column"]:has(button[title*="Refresh this company"]) {
-  margin-left: -12px !important;
-  min-width: 28px !important;
-}
-
 /* Indicator rows */
 .pb-rows{ padding:8px 0 16px 48px; }
 details.pb-row{ padding:0; display:block; }
@@ -432,6 +413,7 @@ details.pb-row > summary:hover{ background:var(--line-soft); border-radius:6px; 
   fill: currentColor !important;
 }
 .pb-row-label{ font-size:15px; font-weight:600; color:var(--ink-900); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pb-weight{ font-size:12px; font-weight:600; color:var(--ink-700); margin-left:6px; font-family:"JetBrains Mono",ui-monospace,monospace; }
 .pb-row-val{ font-size:14px; font-weight:600; color:var(--ink-900); font-family:"JetBrains Mono",ui-monospace,monospace; }
 .pb-row-badge{
   display:inline-flex; align-items:center; gap:3px; border-radius:var(--radius-pill);
@@ -556,7 +538,10 @@ def _esc(value: object) -> str:
 
 
 def _display_sector(sector: str) -> str:
-    return (sector or "\u2014").replace("_", " ").title()
+    s = (sector or "").strip()
+    if not s or s.lower() in {"(unknown)", "unknown", "—", "-"}:
+        return "Unknown"
+    return s.replace("_", " ").title()
 
 
 def _status_badge(status: str) -> str:
@@ -819,6 +804,45 @@ def _distribution_html(stats: PortfolioStats) -> str:
     )
 
 
+def _drivers_html(stats: PortfolioStats) -> str:
+    """HTML for top weighted risk drivers (indicator contrib = avg(score * weight))."""
+    items = stats.indicator_contributions[:5]
+    if not items:
+        return '<div style="color:var(--ink-500);font-size:13px;">n/a</div>'
+    rows: list[str] = []
+    for _iid, contrib, label in items:
+        pct = min(100.0, max(0.0, contrib))
+        rows.append(
+            '<div class="pb-sec-row">'
+            f'<span class="pb-sec-name">{_esc(label)}</span>'
+            f'<span class="pb-sec-meta">{contrib:.1f}</span>'
+            f'<span class="pb-sec-bar"><span class="pb-sec-bar-fill" style="width:{pct:.0f}%;background:#3b82f6"></span></span>'
+            "</div>"
+        )
+    return "<div>" + "".join(rows) + "</div>"
+
+
+def _correlated_risk_html(stats: PortfolioStats) -> str:
+    """Small widget showing high-risk companies that move together (from correlation edges)."""
+    pairs = stats.correlated_pairs or []
+    if not pairs:
+        return '<div style="color:var(--ink-500);font-size:13px;">No strong correlations among high-risk names.</div>'
+    items: list[str] = []
+    for a, b, corr in pairs[:4]:
+        sign = "+" if corr >= 0 else ""
+        items.append(
+            f'<span class="pb-chip" style="margin:2px 4px 2px 0">'
+            f'<b>{_esc(a)}</b> ↔ <b>{_esc(b)}</b> <span style="color:#3b82f6;font-family:monospace">{sign}{corr:.2f}</span>'
+            f"</span>"
+        )
+    return (
+        '<div style="font-size:13px;line-height:1.6">'
+        f"{len(pairs)} strong co-movement pair(s) among high-risk companies<br>"
+        + "".join(items)
+        + "</div>"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Risk exposure card (replaces the credit-card visual)
 # ---------------------------------------------------------------------------
@@ -862,8 +886,16 @@ def _donut_svg(
 
 def _risk_exposure_html(stats: PortfolioStats) -> str:
     """A donut chart of good/warning/bad borrower counts + a compact legend
-    and stat row. Replaces the credit-card widget — fits the risk theme."""
-    n = stats.n_companies or 1
+    and stat row. Replaces the credit-card widget — fits the risk theme.
+    Uses only real data; empty when no real borrowers."""
+    if stats.n_companies == 0:
+        return """
+        <div class="pb-card pb-expose">
+          <div class="pb-card-title">Risk exposure</div>
+          <div style="color:var(--ink-500);font-size:13px;padding:12px 0;">n/a (no real data)</div>
+        </div>
+        """
+    n = stats.n_companies
     good_f = stats.n_good / n
     warn_f = stats.n_warning / n
     bad_f = stats.n_bad / n
@@ -922,44 +954,56 @@ def _risk_exposure_html(stats: PortfolioStats) -> str:
 
 
 def render_portfolio_overview(stats: PortfolioStats) -> None:
-    """Centered symmetric overview:
+    """Centered symmetric overview using real computed data (no hardcoded/demo values
+    for the top widgets themselves — values come from weighted per-company composites
+    and indicator results).
 
-    1. KPI strip (4 cards, centered text)
-    2. Chart card (spline line + bar, side by side)
-    3. Risk breakdown + sector exposure (side by side)
-    4. Top risk borrowers list (full width)
-    5. Risk exposure donut card (centered)
+    Widgets:
+    - 4 KPIs (mean risk, HHI, country conc, data coverage)
+    - Weighted risk drivers (top indicators by avg score x weight)
+    - Sector risk bars
+    - Risk distribution + sector exposure
+    - Top risk borrowers + exposure card
+    - Correlated risk (high-risk pairs with strong return co-movement)
+    - Stat chips (sanctions, sentiment, worst indicator)
+
+    All values derived from live SignalProvider results (real landed data preferred).
     """
-    mean_status = _composite_status(stats.mean_risk)
-    mean_color = status_color(mean_status)
-
-    # -- KPI strip: 4 centered cards --
-    kpi_htmls = [
-        _kpi_html(
-            f"{stats.mean_risk:.0f}",
-            "Portfolio mean risk",
-            f"{100 - stats.mean_risk:.1f}%",
-            positive=stats.mean_risk < 50,
-        ),
-        _kpi_html(
-            f"{stats.hhi:.0f}",
-            "Sector concentration",
-            stats.hhi_label,
-            positive=stats.hhi_label == "low",
-        ),
-        _kpi_html(
-            f"{stats.country_concentration_pct:.0f}%",
-            "Country concentration",
-            f"{stats.n_distinct_countries} countries",
-            positive=stats.country_concentration_pct < 50,
-        ),
-        _kpi_html(
-            f"{stats.data_coverage_pct:.0f}%",
-            "Data coverage",
-            f"{stats.n_companies} borrowers",
-            positive=stats.data_coverage_pct >= 50,
-        ),
-    ]
+    # -- KPI strip: 4 centered cards -- (real data only; n/a when no real borrowers)
+    if stats.n_companies == 0:
+        kpi_htmls = [
+            _kpi_html("—", "Portfolio mean risk", "n/a", positive=True),
+            _kpi_html("—", "Sector concentration", "n/a", positive=True),
+            _kpi_html("—", "Country concentration", "n/a", positive=True),
+            _kpi_html("—", "Data coverage", "0 borrowers", positive=False),
+        ]
+    else:
+        kpi_htmls = [
+            _kpi_html(
+                f"{stats.mean_risk:.0f}",
+                "Portfolio mean risk",
+                f"{100 - stats.mean_risk:.1f}%",
+                positive=stats.mean_risk < 50,
+            ),
+            _kpi_html(
+                f"{stats.hhi:.0f}",
+                "Sector concentration",
+                stats.hhi_label,
+                positive=stats.hhi_label == "low",
+            ),
+            _kpi_html(
+                f"{stats.country_concentration_pct:.0f}%",
+                "Country concentration",
+                f"{stats.n_distinct_countries} countries",
+                positive=stats.country_concentration_pct < 50,
+            ),
+            _kpi_html(
+                f"{stats.data_coverage_pct:.0f}%",
+                "Data coverage",
+                f"{stats.n_companies} borrowers",
+                positive=stats.data_coverage_pct >= 50,
+            ),
+        ]
     kpi_cols = st.columns(4, gap="medium")
     for col, html in zip(kpi_cols, kpi_htmls, strict=False):
         with col:
@@ -967,52 +1011,37 @@ def render_portfolio_overview(stats: PortfolioStats) -> None:
 
     st.write("")
 
-    # -- Chart card: spline trend (mean risk over "sectors" as proxy timeline) --
-    # Build a smooth spline from the sector mean-risk readings.
-    spline_values = [s.mean_risk for s in stats.sectors[:8]] or [stats.mean_risk]
-    spline_labels = [_display_sector(s.sector).split(" ")[0][:10] for s in stats.sectors[:8]] or [
-        "Current"
-    ]
-    spline_svg = _spline_chart_svg(spline_labels, spline_values)
-
-    # Bar chart: sector mean risk bars colored by status
-    bar_labels = spline_labels
-    bar_values = spline_values
-    bar_colors = ["#DB0011"] * len(bar_values)
-    bar_svg = _bar_chart_svg(bar_labels, bar_values, bar_colors)
-
-    # Split: spline left, bar right — symmetric
-    chart_cols = st.columns([1, 1], gap="medium")
-    with chart_cols[0]:
-        st.markdown(
-            f"""
-            <div class="pb-card">
-              <div class="pb-chart-head">
-                <div class="pb-chart-title">Risk trend</div>
-                <div class="pb-chart-meta">mean risk across sectors</div>
-                <div class="pb-chart-big" style="color:{mean_color}">{stats.mean_risk:.0f}<span style="font-size:14px;color:var(--ink-500);font-weight:400">/100</span></div>
-              </div>
-              {spline_svg}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with chart_cols[1]:
-        st.markdown(
-            f"""
-            <div class="pb-card">
-              <div class="pb-chart-head">
-                <div class="pb-chart-title">Sector risk</div>
-                <div class="pb-chart-meta">mean risk by sector</div>
-                <div class="pb-chart-big">{stats.n_companies}<span style="font-size:14px;color:var(--ink-500);font-weight:400"> borrowers</span></div>
-              </div>
-              {bar_svg}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    # -- Weighted risk drivers (Sector risk widget removed due to unreliable/missing sector data) --
+    drivers_html = _drivers_html(stats)
+    st.markdown(
+        f"""
+        <div class="pb-card">
+          <div class="pb-chart-head">
+            <div class="pb-chart-title">Weighted risk drivers</div>
+            <div class="pb-chart-meta">top indicators by score x weight</div>
+            <div class="pb-chart-big">{len(stats.indicator_contributions)}<span style="font-size:14px;color:var(--ink-500);font-weight:400"> drivers</span></div>
+          </div>
+          {drivers_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     st.write("")
+
+    # -- Correlated risk widget (high-risk co-movers from graph) --
+    if stats.correlated_pairs:
+        corr_html = _correlated_risk_html(stats)
+        st.markdown(
+            f"""
+            <div class="pb-card">
+              <div class="pb-card-title">Correlated high-risk</div>
+              {corr_html}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.write("")
 
     # -- Risk breakdown + sector exposure, side by side --
     sec_rows = "".join(_sector_html(s) for s in stats.sectors) or (
@@ -1020,11 +1049,12 @@ def render_portfolio_overview(stats: PortfolioStats) -> None:
     )
     breakdown_cols = st.columns([1, 1], gap="medium")
     with breakdown_cols[0]:
+        dist_html = _distribution_html(stats) if stats.n_companies > 0 else '<div style="color:var(--ink-500);font-size:13px;">n/a (no real data)</div>'
         st.markdown(
             f"""
             <div class="pb-card">
               <div class="pb-card-title">Risk distribution</div>
-              {_distribution_html(stats)}
+              {dist_html}
             </div>
             """,
             unsafe_allow_html=True,
@@ -1134,7 +1164,10 @@ def _row_html(
     indicator_id: str,
     label: str,
     description: str,
+    weight: float,
     result: SignalResult,
+    *,
+    total_weight: float = 1.0,
 ) -> str:
     tok = _token(result.status)
     fg = tok["fg"]
@@ -1160,11 +1193,16 @@ def _row_html(
         bar = ""
         num = ""
     else:
+        eff_w = weight / total_weight if total_weight > 0 else weight
+        contrib = result.score * eff_w
         bar = (
-            f'<span class="pb-row-bar"><span class="pb-row-bar-fill" '
+            f'<span class="pb-row-bar" title="raw signal score (severity): {result.score:.0f}">'
+            f'<span class="pb-row-bar-fill" '
             f'style="width:{result.score:.0f}%;background:{fg}"></span></span>'
         )
-        num = f'<span class="pb-row-num">{result.score:.0f}</span>'
+        # The number shown is the direct contribution to the composite (score x normalized weight).
+        # All these numbers across indicators add up to the aggregated score.
+        num = f'<span class="pb-row-num" title="raw score: {result.score:.0f} | weight {weight:.3f}">{contrib:.1f}</span>'
 
     desc_html = f'<div class="pb-row-desc">{_esc(description)}</div>' if description else ""
     detail_rows = ""
@@ -1185,6 +1223,7 @@ def _row_html(
             for s in result.source_ids
         )
         src_html = f'<div class="pb-row-src">{chips}</div>'
+
     detail_body = desc_html + detail_rows + note_html + src_html
     if not detail_body:
         detail_body = '<div class="pb-row-note">no detail</div>'
@@ -1193,7 +1232,7 @@ def _row_html(
         f'<details class="pb-row"><summary>'
         f'<span class="pb-row-left">'
         f'<span class="pb-row-tile" style="background:{acc["bg"]};color:{acc["fg"]}">{topic_ic}</span>'
-        f'<span class="pb-row-label">{_esc(label)}</span>'
+        f'<span class="pb-row-label">{_esc(label)} <span class="pb-weight">Weight {weight:.3f}</span></span>'
         f"</span>"
         f"{mid}"
         f'<span class="pb-row-right">'
@@ -1213,7 +1252,7 @@ def render_company_card(
     ticker: str,
     composite: float,
     status: str,
-    rows: Iterable[tuple[str, str, str, SignalResult]],
+    rows: Iterable[tuple[str, str, str, float, SignalResult]],
     last_update: str | None = None,
     *,
     anchor_id: str | None = None,
@@ -1243,12 +1282,24 @@ def render_company_card(
     else:
         last_html = '<div class="pb-co-last"></div>'
 
+    rows = list(rows)  # the input may be a generator; consume once
+
+    # Compute total weight of scored indicators so we can show direct contributions
+    # (score * (w / total)) that literally sum to the composite.
+    scored_statuses = {"good", "warning", "bad"}
+    total_weight = (
+        sum(w for _iid, _lbl, _desc, w, res in rows if res.status in scored_statuses) or 1.0
+    )
+
     # Always render full indicator list (including demo/"no data found" for newly added or partial companies)
-    body_rows = "".join(_row_html(iid, lbl, desc, result) for iid, lbl, desc, result in rows)
+    body_rows = "".join(
+        _row_html(iid, lbl, desc, w, result, total_weight=total_weight)
+        for iid, lbl, desc, w, result in rows
+    )
     # Collect sources from all rows (now including demo) so newly added companies
     # show the full set of configured indicators/sources even before data lands.
     seen: set[str] = set()
-    for _iid, _lbl, _desc, result in rows:
+    for _iid, _lbl, _desc, _w, result in rows:
         for s in getattr(result, "source_ids", ()):
             if s:
                 seen.add(s)
@@ -1281,7 +1332,7 @@ def render_company_card(
     <div class="pb-co-right">
       <div class="pb-co-comp">
         <div class="pb-co-comp-num" style="color:{fg}">{composite:.0f}</div>
-        <div class="pb-co-comp-lbl">composite / 100</div>
+        <div class="pb-co-comp-lbl">weighted avg / 100</div>
         {last_html}
       </div>
       <span class="pb-co-toggle"><span class="pb-ico-plus">{ic_plus(18)}</span><span class="pb-ico-minus">{ic_minus(18)}</span></span>

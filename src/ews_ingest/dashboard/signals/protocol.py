@@ -88,5 +88,6 @@ class SignalProvider(Protocol):
     label: str
     description: str
     roles: tuple[str, ...]
+    weight: float  # relative importance (0.03-0.12) for weighted composite; displayed in UI
 
     def compute(self, company: Identifiers, ctx: SignalContext) -> SignalResult: ...

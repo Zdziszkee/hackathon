@@ -49,3 +49,5 @@ class PortfolioStats:
     total_sanctions_flags: int = 0
     mean_sentiment: float | None = None
     data_coverage_pct: float = 0.0
+    indicator_contributions: list[tuple[str, float, str]] = field(default_factory=list)
+    correlated_pairs: list[tuple[str, str, float]] = field(default_factory=list)

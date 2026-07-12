@@ -92,6 +92,7 @@ class _Provider:
         "Count of sanctions and politically exposed person (PEP) matches from OpenSanctions."
     )
     roles: tuple[str, ...] = (ROLE,)
+    weight: float = 0.04
 
     def compute(self, company: Identifiers, ctx: SignalContext) -> SignalResult:
         return compute(company, ctx)

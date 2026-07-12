@@ -9,6 +9,7 @@ the functions in this module produce and consume.
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from collections.abc import Iterable
 
 from ews_ingest.dashboard.companies import Company
@@ -89,12 +90,14 @@ def compute_company(
 ) -> tuple[list[tuple[SignalProvider, SignalResult]], float, int]:
     """Run every provider against ``company`` and return ``(results, composite, flags)``.
 
-    ``results`` preserves the provider order; ``composite`` is the mean of
-    scored tiles (0.0 if none); ``flags`` is the leading-integer value of
-    the sanctions provider's tile, or 0 when missing.
+    ``results`` preserves the provider order; ``composite`` is the **weighted**
+    average of scored tiles (weights from provider.weight, default 1.0);
+    ``flags`` is the leading-integer value of the sanctions provider's tile,
+    or 0 when missing.
     """
     results: list[tuple[SignalProvider, SignalResult]] = []
-    scores: list[float] = []
+    weighted: list[tuple[float, float]] = []  # (score, weight)
+    total_w = 0.0
     flags = 0
     for provider in providers:
         result = provider.compute(company.identifiers, ctx)
@@ -108,19 +111,46 @@ def compute_company(
             result.value,
             result.note,
         )
+        w = float(getattr(provider, "weight", 1.0))
         if result.status in _SCORED_STATUSES:
-            scores.append(result.score)
+            weighted.append((result.score, w))
+            total_w += w
         if provider.indicator_id == _SANCTIONS_INDICATOR and result.status in _SCORED_STATUSES:
             flags = _parse_sanctions_flag(result.value)
-    composite = sum(scores) / len(scores) if scores else 0.0
+    composite = sum(s * w for s, w in weighted) / total_w if total_w > 0 else 0.0
     logger.debug(
-        "composite for %s = %.1f (scored %d / %d)",
+        "composite for %s = %.1f (scored %d / %d, total_w=%.2f)",
         company.ticker,
         composite,
-        len(scores),
+        len(weighted),
         len(results),
+        total_w,
     )
     return results, composite, flags
+
+
+def _indicator_contributions(
+    rows: list[CompanyResult],
+) -> list[tuple[str, float, str]]:
+    """Rank indicators by average weighted contribution (score x weight).
+
+    Returns top contributors sorted by descending avg (score * weight).
+    Used for the "Weighted risk drivers" widget.
+    """
+    contribs: dict[str, list[float]] = defaultdict(list)
+    labels: dict[str, str] = {}
+    for _co, res, _sc, _fl in rows:
+        for p, r in res:
+            if r.status in _SCORED_STATUSES:
+                w = float(getattr(p, "weight", 1.0))
+                contribs[p.indicator_id].append(r.score * w)
+                labels[p.indicator_id] = p.label
+    result: list[tuple[str, float, str]] = []
+    for iid, vals in contribs.items():
+        avg = sum(vals) / len(vals) if vals else 0.0
+        result.append((iid, avg, labels.get(iid, iid)))
+    result.sort(key=lambda x: -x[1])
+    return result[:6]  # top drivers
 
 
 def portfolio_stats(
@@ -128,7 +158,32 @@ def portfolio_stats(
 ) -> PortfolioStats:
     """Aggregate per-company results into cross-portfolio risk metrics."""
     rows = list(computed)
-    n = max(len(rows), 1)
+    if not rows:
+        return PortfolioStats(
+            n_companies=0,
+            mean_risk=0.0,
+            n_good=0,
+            n_warning=0,
+            n_bad=0,
+            sectors=[],
+            sector_other_count=0,
+            hhi=0.0,
+            hhi_label="low",
+            countries={},
+            country_concentration_pct=0.0,
+            n_distinct_countries=0,
+            top_risk=[],
+            worst_indicator_id="",
+            worst_indicator_label="",
+            worst_indicator_mean=0.0,
+            total_sanctions_flags=0,
+            mean_sentiment=None,
+            data_coverage_pct=0.0,
+            indicator_contributions=[],
+            correlated_pairs=[],
+        )
+
+    n = len(rows)
     all_scores = [sc for _co, _res, sc, _fl in rows]
 
     n_good, n_warning, n_bad = _score_buckets(all_scores)
@@ -139,9 +194,10 @@ def portfolio_stats(
     total_flags = _total_sanctions_flags(rows)
     mean_sentiment = _mean_sentiment(rows)
     coverage = _data_coverage(rows)
+    ind_contribs = _indicator_contributions(rows)
 
     return PortfolioStats(
-        n_companies=len(rows),
+        n_companies=n,
         mean_risk=sum(all_scores) / n,
         n_good=n_good,
         n_warning=n_warning,
@@ -160,6 +216,7 @@ def portfolio_stats(
         total_sanctions_flags=total_flags,
         mean_sentiment=mean_sentiment,
         data_coverage_pct=coverage,
+        indicator_contributions=ind_contribs,
     )
 
 
@@ -282,5 +339,5 @@ def _mean_sentiment(rows: list[CompanyResult]) -> float | None:
 def _data_coverage(rows: list[CompanyResult]) -> float:
     """Percentage of tiles backed by landed (non-demo/"no data found") data."""
     total_real = sum(1 for _co, res, _s, _f in rows for _p, r in res if r.status in _REAL_STATUSES)
-    total_tiles = sum(len(res) for _co, res, _s, _f in rows) or 1
-    return total_real / total_tiles * 100
+    total_tiles = sum(len(res) for _co, res, _s, _f in rows)
+    return (total_real / total_tiles * 100) if total_tiles else 0.0

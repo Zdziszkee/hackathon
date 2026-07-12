@@ -151,6 +151,7 @@ class _Provider:
         "for this company. Works against any source bound to news.distress."
     )
     roles: tuple[str, ...] = (ROLE,)
+    weight: float = 0.04
 
     def compute(self, company: Identifiers, ctx: SignalContext) -> SignalResult:
         return compute(company, ctx)

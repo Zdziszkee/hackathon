@@ -132,6 +132,7 @@ class _Provider:
         f"portfolio's state sources. Higher = more labor-market stress."
     )
     roles: tuple[str, ...] = (ROLE,)
+    weight: float = 0.06
 
     def compute(self, company: Identifiers, ctx: SignalContext) -> SignalResult:
         return compute(company, ctx)

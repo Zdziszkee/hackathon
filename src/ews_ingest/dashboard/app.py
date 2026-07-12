@@ -5,7 +5,7 @@ historical store (see :mod:`ews_ingest.dashboard.db`). Companies are stored
 in a dynamic JSON file (see :mod:`ews_ingest.dashboard.company_store`); no
 hardcoded entities.yaml. Indicator bindings come from ``config/indicators.yaml``.
 
-Data sources (ingestion CLI or scheduled) write historical records to SQLite
+    Data sources write historical records to SQLite (via onboarding or external fetchers)
 independently. The UI computes indicators from the DB on each render and supports
 global + per-company force-refresh triggers that mark pending then run the
 fetch in a background thread (writing fresh records to DB).
@@ -98,7 +98,8 @@ _portfolio_stats = portfolio_stats
 
 
 # ---------------------------------------------------------------------------
-# Correlation graph (placeholder hardcoded data)
+# Correlation graph (uses real yfinance returns + computed scores; falls back
+# to sector/score heuristic only if no returns data)
 # ---------------------------------------------------------------------------
 
 
@@ -229,23 +230,6 @@ def _process_queued_mutation() -> None:
                 st.error(f"Could not resolve {tkr!r}: {exc}")
             except Exception as exc:
                 st.error(f"Action failed: {exc}")
-
-
-def _start_company_refresh(ticker: str) -> None:
-    """Mark a company for background refresh and trigger it.
-    Used from refresh buttons so we can show loading state without full page white flash.
-    Toast via flag (displayed in fragment body).
-    """
-    logger.info("_start_company_refresh called for ticker=%s", ticker)
-    start = datetime.now(UTC).isoformat()
-    st.session_state.setdefault("pending_refreshes", {})[ticker] = start
-    logger.info(
-        "starting refresh for ticker=%s via button (setting pending, spawning fetch)",
-        ticker,
-    )
-    trigger_refresh(ticker, blocking=False)
-    st.session_state["_toast"] = (f"Refreshing {ticker}…", "⏳")
-    logger.info("refresh dispatched for %s, pending set, will full-rerun to activate poll", ticker)
 
 
 def _start_company_mutation(ticker: str, *, is_remove: bool) -> None:
@@ -384,6 +368,46 @@ def main() -> None:
         computed: list[CompanyResult] = _compute(fp)
         _ensure_data_for_new_companies(companies, hist)
         stats = portfolio_stats(computed)
+
+        # Compute correlated high-risk pairs for the overview widget.
+        # Uses the same graph logic (yfinance returns when available).
+        try:
+            from dataclasses import replace
+
+            from ews_ingest.dashboard.graph import CompanyGraph, build_correlation_edges
+
+            companies_graph: list[CompanyGraph] = [
+                CompanyGraph(
+                    name=co.name,
+                    score=composite,
+                    sector=co.sector or "Unknown",
+                    status=_composite_status(composite),
+                    ticker=(co.ticker or co.name).upper(),
+                )
+                for co, _res, composite, _flags in computed
+            ]
+            returns: dict[str, Any] = {}
+            tickers = [c.ticker for c in companies_graph]
+            if tickers:
+                returns = _fetch_graph_returns(tuple(tickers))
+            edges = build_correlation_edges(companies_graph, returns or None)
+            if not edges and companies_graph:
+                edges = build_correlation_edges(companies_graph)
+            high_risk = {
+                c.ticker
+                for c in companies_graph
+                if c.status in ("warning", "bad") or c.score >= 60.0
+            }
+            corr_pairs: list[tuple[str, str, float]] = []
+            for a, b, corr in edges:
+                if a in high_risk and b in high_risk and abs(corr) >= 0.55:
+                    corr_pairs.append((a, b, round(float(corr), 2)))
+            corr_pairs = sorted(corr_pairs, key=lambda x: -abs(x[2]))[:5]
+            if corr_pairs:
+                stats = replace(stats, correlated_pairs=corr_pairs)
+        except Exception:  # noqa: S110 - non-fatal for widget
+            pass
+
         render_portfolio_overview(stats)
         try:
             if computed:
@@ -407,10 +431,11 @@ def main() -> None:
     def _companies_section(suggest: TickerSuggest) -> None:
         """Companies add/search + cards list in a single fragment.
 
-        Per-company refresh/add/remove are handled via background threads +
-        fragment-scoped updates where possible so only the concerned company
-        card is affected during the operation. Full rerun only to (de)activate
-        polling or after structural list changes for the graph/overview.
+        Add/remove (and associated background data refreshes) are handled via
+        background threads + fragment-scoped updates where possible so only
+        the concerned company card is affected during the operation. Full rerun
+        only to (de)activate polling or after structural list changes for the
+        graph/overview.
         """
         logger.info("_companies_section ENTER (fragment body running)")
         # Fresh companies from SQLite DB (instant on open/restart).
@@ -624,7 +649,7 @@ def main() -> None:
             # with run_every=None (stopping the background polling).
             st.rerun(scope="app")
 
-        # Display any toast scheduled during this run (from add/remove or refresh buttons).
+        # Display any toast scheduled during this run (from add/remove).
         # Must be in fragment body.
         if "_toast" in st.session_state:
             msg, icon = st.session_state.pop("_toast")
@@ -728,32 +753,19 @@ def _render_company_cards(
                 cik=company.identifiers.cik if hasattr(company, "identifiers") else None,
             )
 
-        left, right = st.columns([0.94, 0.06], gap="small")
-        with left:
-            render_company_card(
-                company.name,
-                company.sector,
-                company.ticker,
-                composite,
-                comp_status,
-                ((p.indicator_id, p.label, p.description, r) for p, r in real_results),
-                last_update=last,
-                anchor_id=ticker,
-            )
-        with right:
-            if st.button(
-                "↻",
-                key=f"ews_refresh_{ticker}",
-                help="Refresh this company",
-                use_container_width=False,
-                width="content",
-            ):
-                logger.info("refresh button clicked for ticker=%s (inside cards)", ticker)
-                _start_company_refresh(ticker)
-                # Full rerun to activate conditional polling (run_every) for this
-                # ticker's pending state. Fragment polls will update only this card.
-                logger.info("about to rerun after refresh click for %s", ticker)
-                st.rerun()
+        render_company_card(
+            company.name,
+            company.sector,
+            company.ticker,
+            composite,
+            comp_status,
+            (
+                (p.indicator_id, p.label, p.description, getattr(p, "weight", 1.0), r)
+                for p, r in real_results
+            ),
+            last_update=last,
+            anchor_id=ticker,
+        )
 
     if focus_ticker and scroll_key and not st.session_state.get(scroll_key):
         import streamlit.components.v1 as _st_v1

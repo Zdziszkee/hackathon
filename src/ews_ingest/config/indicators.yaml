@@ -14,6 +14,16 @@
 # changes. Adding a new indicator: drop a file in `signals/` and add its role.
 #
 # Roles are surfaced by SignalProvider modules via `SignalContext.source_for(role)`.
+#
+# Each provider declares a `weight` (0.03-0.12) used for the aggregated composite score
+# (weighted average instead of simple mean) and displayed in the UI next to the label.
+# Real landed data always takes precedence over any demo/hardcoded fallback values.
+# The current set of 15 indicators is a balanced mix for corporate credit EWS:
+#   financial health (profitability, earnings), market signals (momentum, vol, spreads),
+#   insider/event (insider, warn, news), macro/external (macro, supply, demand, geo),
+#   context (country, industry, regulation).
+# Suggested future: add leverage/liquidity from XBRL, customer concentration; deprecate
+# redundant pure-macro if more per-entity data available.
 
 roles:
   # ISM Manufacturing PMI is now behind a Cloudflare/SSO paywall (verified:

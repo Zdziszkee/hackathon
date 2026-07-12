@@ -29,17 +29,6 @@ Python 3.14 project managed with `uv` (uv.lock + pyproject.toml). `src/ews_inges
 
 CI (.github/workflows/ci.yml) runs the checks + unit tests only.
 
-## CLI
-
-`uv run --env-file .env python -m ews_ingest <cmd>`
-
-- `list` — all registered source_ids
-- `validate` — sources.yaml + env vars
-- `run <source_id>` — fetch + land records
-- `onboard <TICKER> [--async]` — resolve ticker then run its per-entity sources (background if --async)
-
-See src/ews_ingest/cli.py for details. SEC_USER_AGENT always required.
-
 ## Dashboard
 
 `uv run --env-file .env streamlit run src/ews_ingest/dashboard/app.py`
@@ -63,4 +52,4 @@ sources.yaml is generated; run generator (or `--check`) after changes. See core/
 
 - Ruff + ty rules are errors (see `[tool.ruff.lint]`, `[tool.ty.rules] all = "error"` in pyproject.toml).
 - Type ignores: `ty: ignore[<code>]` only (`respect-type-ignore-comments = false`).
-- Per-file-ignores relax tests, dashboard, cli, tools (pyproject.toml:79).
+- Per-file-ignores relax tests, dashboard, tools (pyproject.toml).

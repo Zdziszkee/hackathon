@@ -127,6 +127,7 @@ class _Provider:
         "Higher = market-priced default risk. Same value for every company."
     )
     roles: tuple[str, ...] = (ROLE,)
+    weight: float = 0.10
 
     def compute(self, company: Identifiers, ctx: SignalContext) -> SignalResult:
         return compute(company, ctx)

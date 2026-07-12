@@ -174,6 +174,7 @@ class _Provider:
         "macro environment, not a per-company demand curve."
     )
     roles: tuple[str, ...] = (ROLE,)
+    weight: float = 0.05
 
     def compute(self, company: Identifiers, ctx: SignalContext) -> SignalResult:
         return compute(company, ctx)

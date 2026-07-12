@@ -202,6 +202,7 @@ class _Provider:
         f"fundamental news."
     )
     roles: tuple[str, ...] = (ROLE,)
+    weight: float = 0.09
 
     def compute(self, company: Identifiers, ctx: SignalContext) -> SignalResult:
         return compute(company, ctx)

@@ -147,6 +147,7 @@ class _Provider:
 
     description = "Annualized realized volatility of 60-day log returns from Yahoo Finance OHLCV. Higher means riskier."
     roles: tuple[str, ...] = (ROLE,)
+    weight: float = 0.08
 
     def compute(self, company: Identifiers, ctx: SignalContext) -> SignalResult:
         return compute(company, ctx)
