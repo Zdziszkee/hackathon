@@ -28,6 +28,7 @@ from typing import Any
 
 import streamlit as st
 
+from ews_ingest.core.models import Identifiers
 from ews_ingest.dashboard.companies import Company
 from ews_ingest.dashboard.company_store import TickerResolutionError
 from ews_ingest.dashboard.compute import (
@@ -344,81 +345,61 @@ def main() -> None:
     _process_queued_mutation()
 
     logger.info("main: before get_inputs")
-    companies, landing, env, _store, suggest = get_inputs()
+    companies, _landing, _env, _store, suggest = get_inputs()
     logger.info("main: got %d companies from get_inputs", len(companies))
-    hist = make_historical_store()
 
-    providers = list_providers()
-    if not providers:
+    _providers = list_providers()
+    if not _providers:
         st.error("No signal providers registered.")
         return
 
-    ctx = make_signal_ctx(landing, env, historical=hist)
     _ = get_bindings()  # bindings are preloaded by ``make_signal_ctx``
 
-    # --- Compute indicators from DB state (cached for instant loads) ---
-    # Fingerprint uses last_update timestamps from SQLite so that when a
-    # background refresh lands new data the cache key changes and we recompute.
-    # All other renders (interactions, navigation) are instant from cache.
-    def _fp() -> str:
-        parts: list[str] = []
-        for company in companies:
-            t = (company.ticker or "").upper()
-            last = hist.get_last_update(t) or "never"
-            parts.append(f"{t}={last}")
-        blob = "|".join(sorted(parts))
-        return hashlib.md5(blob.encode("utf-8")).hexdigest()[:12]  # noqa: S324
-
-    fp = _fp()
-
-    @st.cache_data(show_spinner=False)
-    def _compute(fp_key: str) -> list[CompanyResult]:  # noqa: ARG001
-        # fp_key only for invalidation; actual data comes from current landing
-        # (populated by the same sources that feed the DB).
-        return [(company, *compute_company(company, providers, ctx)) for company in companies]
-
-    computed: list[CompanyResult] = _compute(fp)
-    logger.info(
-        "outer _compute done for %d companies (graph/portfolio will use this)",
-        len(computed),
-    )
-
-    # --- Auto-fetch for companies added without data ---
-    # If a company was added without its per-entity sources ever being run,
-    # hist has no records for it and all its signals will be demo. Detect
-    # and trigger a background refresh.
-    _ensure_data_for_new_companies(companies, hist)
-
-    # --- Single centered column: no sidebar, no right rail ---
     render_topbar(len(companies))
 
-    # --- Portfolio overview panel (empty state ok) ---
-    stats = portfolio_stats(computed)
+    @st.fragment
+    def _portfolio_and_graph() -> None:
+        companies, landing, env, _store, _ = get_inputs()
+        hist = make_historical_store()
+        providers = list_providers()
+        if not providers:
+            return
+        ctx = make_signal_ctx(landing, env, historical=hist)
 
-    render_portfolio_overview(stats)
+        def _fp() -> str:
+            parts: list[str] = []
+            for company in companies:
+                t = (company.ticker or "").upper()
+                last = hist.get_last_update(t) or "never"
+                parts.append(f"{t}={last}")
+            blob = "|".join(sorted(parts))
+            return hashlib.md5(blob.encode("utf-8")).hexdigest()[:12]  # noqa: S324
 
-    # --- Company correlation graph (always expanded) ---
-    # Wrapped so that graph errors (yfinance, widget, etc.) don't kill the entire page
-    # and hide the companies section.
-    try:
-        if computed:
-            with st.expander("Correlation graph", expanded=True):
-                _render_correlation_graph(computed)
-    except Exception as exc:
-        logger.info("correlation graph rendering failed (non-fatal): %s", exc)
-        st.caption("⚠️ Correlation graph unavailable")
-    st.caption(
-        "Historical data served from SQLite DB (data/ews.db). "
-        "Indicators from landed records fed by sources."
-    )
-    st.divider()
+        fp = _fp()
 
-    st.caption("🔧 DEBUG: reached companies section definition (after graph)")
+        @st.cache_data(show_spinner=False)
+        def _compute(fp_key: str) -> list[CompanyResult]:  # noqa: ARG001
+            return [(company, *compute_company(company, providers, ctx)) for company in companies]
 
-    # Poll the companies fragment only while refreshes are pending.
-    # This keeps background activity (script reruns + file watchers) low when idle.
-    # When pending becomes empty we force a full rerun so the next @st.fragment
-    # definition uses run_every=None (no auto-poll).
+        computed: list[CompanyResult] = _compute(fp)
+        _ensure_data_for_new_companies(companies, hist)
+        stats = portfolio_stats(computed)
+        render_portfolio_overview(stats)
+        try:
+            if computed:
+                with st.expander("Correlation graph", expanded=True):
+                    _render_correlation_graph(computed)
+        except Exception as exc:
+            logger.info("correlation graph rendering failed (non-fatal): %s", exc)
+            st.caption("⚠️ Correlation graph unavailable")
+        st.caption(
+            "Historical data served from SQLite DB (data/ews.db). "
+            "Indicators from landed records fed by sources."
+        )
+        st.divider()
+
+    _portfolio_and_graph()
+
     pending_now = st.session_state.get("pending_refreshes", {}) or {}
     run_every = 5 if pending_now else None
 
@@ -457,6 +438,31 @@ def main() -> None:
             ss_set = st.session_state.get(key) or set()
             if ss_set:
                 st.session_state[key] = ss_set & current_tickers
+
+        # Handle provisional adds (from select label) so add shows a card *instantly*
+        # with known name/ticker while real resolution + data fetch happens in bg.
+        provisional_adds: dict[str, dict[str, str]] = (
+            st.session_state.get("provisional_adds", {}) or {}
+        )
+        for t in list(provisional_adds):
+            if t in current_tickers:
+                provisional_adds.pop(t, None)
+        if provisional_adds:
+            st.session_state["provisional_adds"] = provisional_adds
+        else:
+            st.session_state.pop("provisional_adds", None)
+
+        # Augment display list with any provisionals not yet in DB
+        display_companies = list(fresh_companies)
+        for tkr, pinfo in provisional_adds.items():
+            if tkr not in current_tickers:
+                ident = Identifiers(
+                    ticker=tkr,
+                    name=pinfo.get("name", tkr),
+                    extra_ids={"sector": pinfo.get("sector", "")},
+                )
+                display_companies.append(Company(identifiers=ident))
+
         update_ts = time.time()
         tickers = [c.ticker for c in fresh_companies]
         logger.info(
@@ -483,6 +489,11 @@ def main() -> None:
                         st.session_state.setdefault("pending_refreshes", {})[tkr] = start
                         st.session_state["_toast"] = (f"Added {tkr}. Fetching data…", "⏳")
                         st.session_state["_force_full_rerun"] = True
+                        # real one now in DB; drop provisional
+                        prov = st.session_state.get("provisional_adds") or {}
+                        prov.pop(tkr, None)
+                        if not prov:
+                            st.session_state.pop("provisional_adds", None)
                         logger.info(
                             "applied add completion for %s "
                             "(set pending + toast + force) *** will reflect on next update ***",
@@ -494,27 +505,38 @@ def main() -> None:
                 else:
                     st.session_state["_last_error"] = info.get("error", f"Unknown error for {tkr}")
                     logger.info("applied error from mutation for %s", tkr)
+                # always clear any provisional for this ticker on completion
+                if info.get("action") == "add":
+                    prov = st.session_state.get("provisional_adds") or {}
+                    prov.pop(tkr, None)
+                    if not prov:
+                        st.session_state.pop("provisional_adds", None)
                 resolving.discard(orig_tkr)
                 resolving.discard(tkr)
                 removing = st.session_state.get("removing_tickers", set()) or set()
                 removing.discard(orig_tkr)
                 removing.discard(tkr)
                 st.session_state["removing_tickers"] = removing
+                if "company_native_select" in st.session_state:
+                    st.session_state.pop("company_native_select", None)
                 logger.info("*** MUTATION PROCESSED in main, next render shows updated list ***")
 
         if st.session_state.pop("_force_full_rerun", False):
-            logger.info("force_full_rerun flag seen — triggering full app rerun")
-            st.rerun()
+            logger.info("force flag — frag rerun (cos); overview later")
+            st.rerun(scope="fragment")
 
         # refresh sets after possible process clears
         pending = st.session_state.setdefault("pending_refreshes", {})
         resolving = st.session_state.get("resolving_tickers", set()) or set()
         removing = st.session_state.get("removing_tickers", set()) or set()
+        provisional_adds = st.session_state.get("provisional_adds", {}) or {}
         had_pending = bool(pending) or had_pending
 
         last_res = st.session_state.get("_last_results_lookup") or {}
         results_lookup: dict[str, tuple[list[Any], float, int]] = last_res.copy()
-        active_mut = set(pending.keys()) | resolving | removing
+        active_mut = set(pending.keys()) | resolving | removing | set(provisional_adds.keys())
+        for t in provisional_adds:
+            results_lookup.setdefault(t, ([], 0.0, 0))
         to_compute: list[Any] = []
         for company in fresh_companies:
             t = (company.ticker or "").upper()
@@ -557,18 +579,19 @@ def main() -> None:
             logger.info("showing last_error: %s", err)
             st.error(err)
 
-        if not fresh_companies:
+        if not display_companies:
             st.info(
                 "No companies yet. Add one above by ticker (e.g. `AAPL`, `MSFT`, "
                 "`UPS`) — its CIK, name, and sector are resolved from SEC EDGAR."
             )
         else:
             _render_company_cards(
-                fresh_companies,
+                display_companies,
                 hist_f,
                 landing_f,
                 pending,
                 removing,
+                provisional=provisional_adds,
                 results_lookup=results_lookup,
             )
 
@@ -616,6 +639,7 @@ def _render_company_cards(
     landing: LandingReader | None = None,
     pending: dict[str, str] | None = None,
     removing: set[str] | None = None,
+    provisional: dict[str, dict[str, str]] | None = None,
     *,
     results_lookup: dict[str, tuple[list[object], float, int]] | None = None,
 ) -> None:
@@ -633,6 +657,7 @@ def _render_company_cards(
 
     pending = pending or {}
     removing = removing or set()
+    provisional = provisional or {}
     results_lookup = results_lookup or {}
 
     focus_ticker = st.session_state.pop("focus_company", None)
@@ -668,6 +693,10 @@ def _render_company_cards(
 
         if ticker in removing:
             render_removing_company_card(company.name, ticker)
+            continue
+
+        if ticker in provisional:
+            render_loading_company_card(company.name, company.sector, ticker)
             continue
 
         if ticker in pending:
@@ -833,10 +862,6 @@ def _render_add_company_form(
                     is_present,
                     click_ts,
                 )
-                if "company_native_select" in st.session_state:
-                    st.session_state.pop("company_native_select", None)
-                    logger.info("cleared select key after click")
-
                 if is_present:
                     logger.info("*** EXECUTING REMOVE for %s (threaded) ***", ticker)
                     _start_company_mutation(ticker, is_remove=True)
@@ -844,9 +869,19 @@ def _render_add_company_form(
                     st.rerun(scope="fragment")
                 else:
                     logger.info("*** EXECUTING ADD for %s (threaded) ***", ticker)
+                    # Stash provisional info from the select label for instant UI card
+                    name = ticker
+                    if " — " in selected:
+                        parts = selected.split(" — ", 1)
+                        if len(parts) > 1:
+                            name = parts[1].strip()
+                    st.session_state.setdefault("provisional_adds", {})[ticker] = {
+                        "name": name,
+                        "sector": "",
+                    }
                     _start_company_mutation(ticker, is_remove=False)
                     logger.info("*** ADD started, about to rerun ***")
-                    st.rerun()
+                    st.rerun(scope="fragment")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
