@@ -21,7 +21,11 @@ _ALIGNMENT = " | ".join(DISTRESS_KEYWORDS)
 
 
 def _entity_query(name: str) -> str:
-    return f'"{name}" ({_ALIGNMENT})'
+    # GDELT requires OR groups to be self-contained. Build
+    # `("NAME" kw1) | ("NAME" kw2) | ...` so the parens hold OR'd
+    # statements that each include the quoted entity name.
+    quoted = f'"{name}"'
+    return " | ".join(f"({quoted} {kw})" for kw in DISTRESS_KEYWORDS)
 
 
 def parse(raw: dict[str, object]) -> list[RecordInput]:

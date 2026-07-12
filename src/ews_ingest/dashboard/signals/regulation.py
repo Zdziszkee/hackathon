@@ -1,12 +1,10 @@
 """Policy & regulation-stability indicator (role: ``news.distress``).
 
-Proxy: count of GDELT distress articles (per-company) whose titles match a
-regulation/policy keyword set, as a stand-in for "regulatory changes concerning
-this company". GDELT's ``artlist`` mode (what the connector lands) does not
-carry theme codes, so we score titles heuristically for regulation signals.
-
-Imitation of the spec is honest: there is no source that literally counts new
-regulations, so this is the closest existing-source proxy.
+Proxy: count of news stories (per-company) whose titles match a
+regulation/policy keyword set, as a stand-in for "regulatory changes
+concerning this company". Works against any source bound to ``news.distress``:
+GDELT records have ``article.title``; Hacker News records have ``title`` at
+the top level. Both formats are handled.
 """
 
 from __future__ import annotations
@@ -34,7 +32,6 @@ _REGULATION_TERMS = (
     "ruling",
     "law",
     "lawsuit",
-    "lawsuit",
     "ban",
     "tariff",
     "fine",
@@ -51,15 +48,42 @@ _REGULATION_TERMS = (
 )
 
 
-def _title(article: object) -> str:
+def _extract_title(payload: object) -> str:
+    """Pull a title string from either GDELT or Hacker News payload shape."""
+    if not isinstance(payload, dict):
+        return ""
+    v = payload.get("title")
+    if isinstance(v, str) and v:
+        return v.lower()
+    article = payload.get("article")
     if isinstance(article, dict):
-        v = article.get("title") or article.get("url") or ""
-        return str(v).lower()
+        t = article.get("title")
+        if isinstance(t, str):
+            return t.lower()
     return ""
 
 
 def _is_regulation(title: str) -> bool:
     return any(term in title for term in _REGULATION_TERMS)
+
+
+def _matches_entity(entities: object, company: Identifiers) -> bool:
+    if not isinstance(entities, list) or not entities:
+        return True
+    for e in entities:
+        # ``rec.entities`` are Pydantic ``Identifiers`` models in-memory;
+        # landing-zone records deserialised from JSON are dicts. Handle both.
+        if isinstance(e, dict):
+            et = e.get("ticker")
+            en = e.get("name")
+        else:
+            et = getattr(e, "ticker", None)
+            en = getattr(e, "name", None)
+        if isinstance(et, str) and company.ticker and et.upper() == company.ticker.upper():
+            return True
+        if isinstance(en, str) and company.name and en.upper() == company.name.upper():
+            return True
+    return False
 
 
 def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
@@ -82,19 +106,18 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=f"{demo.regulation_count()} articles",
             score=min(100.0, demo.regulation_count() * 15.0),
             source_ids=(source_id,),
-            note="No GDELT records landed — showing demo count.",
+            note="No news records landed — showing demo count.",
         )
     count = 0
     total = 0
     for rec in records:
-        if not _matches_entity(rec.entities, company):
+        if not _matches_entity(getattr(rec, "entities", None), company):
             continue
-        payload = rec.payload
-        article = payload.get("article")
-        if article is None:
+        title = _extract_title(rec.payload)
+        if not title:
             continue
         total += 1
-        if _is_regulation(_title(article)):
+        if _is_regulation(title):
             count += 1
     if total == 0:
         return demo_result(
@@ -102,7 +125,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=f"{demo.regulation_count()} articles",
             score=min(100.0, demo.regulation_count() * 15.0),
             source_ids=(source_id,),
-            note="No articles mentioning this company landed — showing demo.",
+            note="No news stories for this company — showing demo count.",
         )
     score = min(100.0, count * 15.0)
     status = "good" if count <= 1 else "warning" if count <= 4 else "bad"
@@ -115,17 +138,14 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
     )
 
 
-def _matches_entity(entities: list[Identifiers], company: Identifiers) -> bool:
-    if not entities:
-        return True
-    return any(e.name and e.name == company.name for e in entities)
-
-
 class _Provider:
     indicator_id = "regulation"
     label = "Policy & Regulation Stability"
 
-    description = "Proxy: count of GDELT distress articles matching regulation/policy keywords for this company."
+    description = (
+        "Proxy: count of news stories matching regulation/policy keywords "
+        "for this company. Works against any source bound to news.distress."
+    )
     roles: tuple[str, ...] = (ROLE,)
 
     def compute(self, company: Identifiers, ctx: SignalContext) -> SignalResult:

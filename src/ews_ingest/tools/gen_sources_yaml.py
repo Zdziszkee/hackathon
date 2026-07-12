@@ -196,7 +196,8 @@ _OVERRIDES: dict[str, dict[str, object]] = {
         "env_required": ["OPENSANCTIONS_API_KEY"],
     },
     # GLEIF / GDELT / EPA / BTS / Treasury / NWS / NHC — no key.
-    "news.gdelt": {"host": "api.gdeltproject.org", "rps": 1.0, "backfill": "18mo"},
+    "news.gdelt": {"host": "api.gdeltproject.org", "rps": 0.2, "backfill": "18mo"},
+    "news.hackernews": {"host": "hn.algolia.com", "rps": 1.0, "backfill": "12mo"},
     "petrochem.epa_echo": {
         "host": "ofmpub.epa.gov",
         "rps": 2.0,

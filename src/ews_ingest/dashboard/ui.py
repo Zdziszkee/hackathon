@@ -25,6 +25,7 @@ from ews_ingest.dashboard.icons import (
     ic_bar_chart,
     ic_boxes,
     ic_building,
+    ic_chart_up,
     ic_dollar,
     ic_file_text,
     ic_gauge,
@@ -33,10 +34,13 @@ from ews_ingest.dashboard.icons import (
     ic_line_chart,
     ic_minus,
     ic_newspaper,
+    ic_percent,
     ic_plus,
     ic_scale,
     ic_shield,
     ic_trending,
+    ic_user_minus,
+    ic_users,
 )
 from ews_ingest.dashboard.signals.protocol import SignalResult
 from ews_ingest.dashboard.stats import PortfolioStats, SectorStat
@@ -120,6 +124,12 @@ ACCENTS = {
     "macro_health": {"bg": "rgba(99,102,241,0.12)", "fg": "#6366F1"},
     "news_sentiment": {"bg": "rgba(168,85,247,0.12)", "fg": "#A855F7"},
     "ism": {"bg": "rgba(251,146,60,0.12)", "fg": "#FB923C"},
+    # Tier-1/Tier-2 EWS additions.
+    "insider_activity": {"bg": "rgba(20,184,166,0.12)", "fg": "#14B8A6"},
+    "credit_spreads": {"bg": "rgba(244,114,182,0.12)", "fg": "#F472B6"},
+    "earnings_surprise": {"bg": "rgba(34,211,238,0.12)", "fg": "#22D3EE"},
+    "price_momentum": {"bg": "rgba(132,204,22,0.12)", "fg": "#84CC16"},
+    "warn_layoffs": {"bg": "rgba(217,119,6,0.12)", "fg": "#D97706"},
 }
 
 _IND_ICON = {
@@ -134,6 +144,12 @@ _IND_ICON = {
     "macro_health": ic_gauge,
     "news_sentiment": ic_newspaper,
     "ism": ic_line_chart,
+    # Tier-1/Tier-2 EWS additions.
+    "insider_activity": ic_users,
+    "credit_spreads": ic_percent,
+    "earnings_surprise": ic_chart_up,
+    "price_momentum": ic_line_chart,
+    "warn_layoffs": ic_user_minus,
 }
 
 # ---------------------------------------------------------------------------
@@ -1267,10 +1283,7 @@ _DEFAULT_NODE_COLOR = "#9FA1A4"
 
 
 def _company_color_map(companies: list[CompanyGraph]) -> dict[str, str]:
-    return {
-        c.ticker: _COMPANY_PALETTE[i % len(_COMPANY_PALETTE)]
-        for i, c in enumerate(companies)
-    }
+    return {c.ticker: _COMPANY_PALETTE[i % len(_COMPANY_PALETTE)] for i, c in enumerate(companies)}
 
 
 def _node_color(element: dict[str, object]) -> str:

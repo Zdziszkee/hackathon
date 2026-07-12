@@ -126,14 +126,15 @@ def test_load_companies_reads_from_json(tmp_path: Path) -> None:
 
 def test_bindings_resolve_roles() -> None:
     b = load_bindings(CONFIG / "indicators.yaml")
-    # macro.ism_pmi is now Cloudflare/SSO-walled & not mirrored to FRED — the
-    # role is intentionally unbound so macro_health honestly reports
-    # ``unavailable`` instead of misleading ``demo``.
-    assert b.source_for("macro.mfg_pmi") is None
+    # macro.ism_pmi is Cloudflare/SSO-walled & not mirrored to FRED. The
+    # role is bound to macro.fred_macro (INDPRO z-score as a PMI proxy)
+    # so the signal can produce real numbers.
+    assert b.source_for("macro.mfg_pmi") == "macro.fred_macro"
     assert b.source_for("macro.mfg_pmi") != "macro.ism_pmi"
     assert b.source_for("credit.ohlcv") == "credit_market.yahoo"
     assert b.source_for("demand.truck") == "macro.fred_macro"
-    assert b.source_for("news.distress") == "news.gdelt"
+    assert b.source_for("news.distress") == "news.hackernews"
+    assert b.source_for("supply_chain.pressure") == "transport.cass_freight"
 
 
 def test_ism_parser_extracts_subindices() -> None:
@@ -187,24 +188,34 @@ def _ctx_with_bindings(tmp_path: Path, roles: dict[str, str | None]) -> tuple[Si
 
 
 def test_macro_health_uses_landed_pmi(tmp_path: Path) -> None:
-    # Bind explicitly: production config marks macro.mfg_pmi unbound (ISM is
-    # paywalled), so ``_ctx`` would yield ``unavailable``. The signal logic
-    # still works when a binding is present.
-    ctx, landing = _ctx_with_bindings(tmp_path, {"macro.mfg_pmi": "macro.ism_pmi"})
-    _write_landing(
-        landing,
-        "macro.ism_pmi",
-        [
-            _rec(
-                "macro.ism_pmi",
-                {"page_text": "PMI registered 51.4 percent. New Orders 50.2 percent."},
-            )
-        ],
+    # Production config binds macro.mfg_pmi -> macro.fred_macro (ISM is
+    # paywalled). The signal maps FRED INDPRO z-scores onto a PMI-like
+    # scale. Here we land a short INDPRO series with the last point
+    # well above the mean -> pmi_like > 52 -> status good.
+    ctx, landing = _ctx_with_bindings(tmp_path, {"macro.mfg_pmi": "macro.fred_macro"})
+    obs = [
+        {"date": "2021-01-01", "value": "100.0"},
+        {"date": "2022-01-01", "value": "100.0"},
+        {"date": "2023-01-01", "value": "100.0"},
+        {"date": "2024-01-01", "value": "100.0"},
+        {"date": "2025-01-01", "value": "100.0"},
+        {"date": "2026-01-01", "value": "105.0"},
+    ]
+    rec = RawRecord(
+        source="macro.fred_macro",
+        source_type=SourceType.API,
+        fetched_at=datetime.now(UTC),
+        fetch_run_id=uuid.uuid4().hex[:8],
+        payload={"observations": obs},
+        raw_format=RawFormat.JSON,
+        content_hash=content_hash({"observations": obs}),
+        entities=[UPS],
+        extra={"series_id": "INDPRO", "label": "industrial_production"},
     )
+    _write_landing(landing, "macro.fred_macro", [rec])
     result = macro_compute(UPS, ctx)
-    assert result.status == "warning"  # 51.4 -> between 50 and 52
-    assert result.value == "51.4"
-    assert result.detail["pmi"] == 51.4
+    assert result.status == "good"  # last point is 5 z above mean -> pmi_like ~ 55
+    assert float(str(result.value)) > 52.0
 
 
 def test_macro_health_demo_when_empty(tmp_path: Path) -> None:
@@ -225,41 +236,52 @@ def test_macro_health_unavailable_when_unbound(tmp_path: Path) -> None:
 
 def test_news_sentiment_aggregates_tone(tmp_path: Path) -> None:
     ctx, landing = _ctx(tmp_path)
-    ident = Identifiers(name="United Parcel Service")
+    ident = Identifiers(name="United Parcel Service", ticker="UPS")
+    # Use Hacker News payload shape (title at top level) — the role
+    # ``news.distress`` is now bound to ``news.hackernews``. VADER is
+    # deterministic on these short titles.
     _write_landing(
         landing,
-        "news.gdelt",
+        "news.hackernews",
         [
-            _rec("news.gdelt", {"article": {"title": "a", "tone": -7.5}}, entities=[ident]),
-            _rec("news.gdelt", {"article": {"title": "b", "tone": -4.2}}, entities=[ident]),
+            _rec(
+                "news.hackernews",
+                {"title": "UPS layoffs hit thousands of workers"},
+                entities=[ident],
+            ),
+            _rec(
+                "news.hackernews", {"title": "UPS fined for antitrust violations"}, entities=[ident]
+            ),
+            _rec(
+                "news.hackernews", {"title": "UPS union strike ends in agreement"}, entities=[ident]
+            ),
         ],
     )
     result = news_compute(UPS, ctx)
-    assert result.status == "bad"  # mean tone ~ -5.85
-    assert str(result.value).startswith("-")
-    assert result.detail["articles"] == 2
+    assert result.status in {"warning", "bad"}  # net negative tone
+    assert result.detail["stories"] == 3
 
 
 def test_regulation_counts_regulation_themed_titles(tmp_path: Path) -> None:
     ctx, landing = _ctx(tmp_path)
-    ident = Identifiers(name="United Parcel Service")
+    ident = Identifiers(name="United Parcel Service", ticker="UPS")
     _write_landing(
         landing,
-        "news.gdelt",
+        "news.hackernews",
         [
             _rec(
-                "news.gdelt",
-                {"article": {"title": "EPA fines carrier over emissions"}},
+                "news.hackernews",
+                {"title": "EPA fines carrier over emissions"},
                 entities=[ident],
             ),
             _rec(
-                "news.gdelt",
-                {"article": {"title": "Weather delays shipments"}},
+                "news.hackernews",
+                {"title": "Weather delays shipments"},
                 entities=[ident],
             ),
             _rec(
-                "news.gdelt",
-                {"article": {"title": "New regulation targets logistics tariffs"}},
+                "news.hackernews",
+                {"title": "New regulation targets logistics tariffs"},
                 entities=[ident],
             ),
         ],

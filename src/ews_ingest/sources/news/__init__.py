@@ -8,6 +8,7 @@ from ews_ingest.sources.news import (  # noqa: F401
     company_ir,
     eight_k,
     gdelt,
+    hackernews,
     mastodon,
     presswire,
 )

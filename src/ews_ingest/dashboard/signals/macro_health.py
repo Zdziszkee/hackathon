@@ -1,26 +1,76 @@
 """Country macro-health indicator (role: ``macro.mfg_pmi``).
 
-Headline ISM Manufacturing PMI parsed from the landed page text. PMI > 50 =
-expansion (lower risk); below 50 = contraction (higher risk).
+Originally: headline ISM Manufacturing PMI parsed from the landed page text.
+ISM is now paywalled and the page returns HTML; the role is bound to
+``macro.fred_macro`` as a proxy. We pick the FRED ``INDPRO`` (Industrial
+Production Index) series and show a PMI-like score: the recent z-score of
+the 5-year monthly series, mapped onto a 0..100 scale where 50 = neutral
+(``good`` >=52, ``warning`` 50..52, ``bad`` <50).
+
+Note: this is *not* the literal ISM Manufacturing PMI; it's a manufacturing
+health proxy. The role is repurposed (rename in YAML if a dedicated
+``macro.ism`` source ever lands).
 """
 
 from __future__ import annotations
+
+from collections.abc import Iterable
 
 from ews_ingest.core.models import Identifiers
 from ews_ingest.dashboard.demo import DemoValues
 from ews_ingest.dashboard.signals import (
     SignalContext,
     SignalResult,
+    cast_status,
     demo_result,
-    ok_result,
     register_provider,
-    unavailable_result,
 )
-from ews_ingest.dashboard.signals.ism import parse_ism
 
 __all__ = ["Provider", "compute"]
 
 ROLE = "macro.mfg_pmi"
+
+_INDPRO_SERIES_ID = "INDPRO"
+_PMI_LIKE_NEUTRAL = 50.0
+_PMI_LIKE_SCALE = 5.0  # 1 z-score -> 5 PMI-like points
+
+
+def _read_indpro_points(records: Iterable[object]) -> list[float]:
+    """Pull INDPRO values (chronological) from a list of FRED RawRecord."""
+    out: list[tuple[str, float]] = []
+    for rec in records:
+        extra = getattr(rec, "extra", None)
+        if not isinstance(extra, dict):
+            continue
+        if extra.get("series_id") != _INDPRO_SERIES_ID:
+            continue
+        payload = getattr(rec, "payload", None)
+        if not isinstance(payload, dict):
+            continue
+        for row in payload.get("observations", []) or []:
+            if not isinstance(row, dict):
+                continue
+            v = row.get("value")
+            date = row.get("date") or ""
+            if isinstance(v, (int, float)):
+                out.append((str(date), float(v)))
+            elif isinstance(v, str) and v not in {"", ".", "nan", "NaN"}:
+                try:
+                    out.append((str(date), float(v)))
+                except ValueError:
+                    continue
+    out.sort(key=lambda x: x[0])
+    return [v for _, v in out]
+
+
+def _zscore(series: list[float]) -> float | None:
+    if len(series) < 5:
+        return None
+    mean = sum(series) / len(series)
+    var = sum((x - mean) ** 2 for x in series) / (len(series) - 1)
+    if var <= 0:
+        return 0.0
+    return (series[-1] - mean) / var**0.5
 
 
 def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
@@ -28,50 +78,45 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
     demo = DemoValues.for_company(seed)
     source_id = ctx.source_for(ROLE)
     if source_id is None:
-        # The role is intentionally left unbound in config when the underlying
-        # source is dead (ISM is paywalled, FRED doesn't mirror it). Report
-        # ``unavailable`` honestly rather than a misleading demo value.
-        return unavailable_result(
+        return SignalResult(
+            value="n/a",
+            score=0.0,
+            status=cast_status("unavailable"),
+            detail={},
+            source_ids=(),
             note="No PMI source bound for this portfolio.",
         )
     if missing := ctx.missing_env(source_id):
         return demo_result(
             label_hint="macro_health",
-            value=f"{demo.pmi()}",
-            score=abs(50.0 - demo.pmi()) * 5.0,
+            value=f"{demo.pmi():.1f}",
+            score=abs(_PMI_LIKE_NEUTRAL - demo.pmi()) * _PMI_LIKE_SCALE,
             missing_env=tuple(missing),
             source_ids=(source_id,),
             note="API key not configured — showing demo PMI.",
         )
-    store = ctx.landing.read(source_id)
-    latest = store.latest()
-    if latest is None:
+    records = ctx.landing.read(source_id).records
+    points = _read_indpro_points(records)
+    z = _zscore(points)
+    if z is None:
         return demo_result(
             label_hint="macro_health",
-            value=f"{demo.pmi()}",
-            score=abs(50.0 - demo.pmi()) * 5.0,
+            value=f"{demo.pmi():.1f}",
+            score=abs(_PMI_LIKE_NEUTRAL - demo.pmi()) * _PMI_LIKE_SCALE,
             source_ids=(source_id,),
-            note="No ISM PMI records landed — showing demo PMI.",
+            note="Not enough FRED INDPRO points landed — showing demo PMI.",
         )
-    page_text = str(latest.payload.get("page_text") or "")
-    ism = parse_ism(page_text)
-    pmi = ism["headline"]
-    if pmi is None:
-        return demo_result(
-            label_hint="macro_health",
-            value=f"{demo.pmi()}",
-            score=abs(50.0 - demo.pmi()) * 5.0,
-            source_ids=(source_id,),
-            note="Could not parse PMI from landed page text — showing demo.",
-        )
-    score = abs(50.0 - pmi) * 5.0
-    status = "good" if pmi >= 52 else "warning" if pmi >= 50 else "bad"
-    return ok_result(
-        value=f"{pmi:.1f}",
+    pmi_like = _PMI_LIKE_NEUTRAL + z * _PMI_LIKE_SCALE
+    pmi_like = max(0.0, min(100.0, pmi_like))
+    score = abs(_PMI_LIKE_NEUTRAL - pmi_like) * 2.0
+    status = "good" if pmi_like >= 52 else "warning" if pmi_like >= 50 else "bad"
+    return SignalResult(
+        value=f"{pmi_like:.1f}",
         score=min(100.0, max(0.0, score)),
         status=status,
-        detail={"pmi": pmi},
+        detail={"pmi_like": round(pmi_like, 2), "z_score": round(z, 3), "points": len(points)},
         source_ids=(source_id,),
+        note="FRED INDPRO z-score mapped to PMI-like scale (ISM is paywalled).",
     )
 
 
@@ -80,7 +125,8 @@ class _Provider:
     label = "Country Macro Health (PMI)"
 
     description = (
-        "ISM Manufacturing PMI headline. Above 50 means expansion, below 50 means contraction."
+        "Manufacturing-health proxy: FRED INDPRO z-score mapped to a PMI-like "
+        "scale (50 = neutral). Above 50 means expansion, below 50 means contraction."
     )
     roles: tuple[str, ...] = (ROLE,)
 

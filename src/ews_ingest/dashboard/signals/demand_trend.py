@@ -27,14 +27,14 @@ from ews_ingest.dashboard.signals import (
 __all__ = ["Provider", "compute"]
 
 
-ROLE = "macro.mfg_pmi"
+ROLE = "macro.demand_trend"
 
 # Universal economic demand proxy: the FRED INDPRO (Industrial
 # Production Index) series. The signal runs the same series for
 # every company — the result represents the macro environment, not a
 # per-company demand curve. Sources are looked up via
-# ``config/indicators.yaml`` under the ``macro.mfg_pmi`` role (the
-# closest existing role; rename in YAML if a dedicated role is added).
+# ``config/indicators.yaml`` under the ``macro.demand_trend`` role,
+# which is bound to ``macro.fred_macro`` (INDPRO + TCU series).
 _VALUE_KEYS = ("value", "Value")
 _OBS_KEYS = ("observations", "data")
 
@@ -62,6 +62,14 @@ def _numeric_points(payload: dict[str, object]) -> list[float]:
                     out.append(float(value))
                 break
     return out
+
+
+# FRED series IDs we treat as "demand" for this signal. macro.fred_macro
+# emits multiple series per run (yields + INDPRO + TCU + TRUCKD11); we
+# restrict to industrial production (INDPRO) so the slope reflects real
+# activity on a single consistent scale (index ~100) rather than a mixed
+# unit soup with TCU's percentage scale.
+_DEMAND_SERIES_IDS = frozenset({"INDPRO"})
 
 
 def _slope(points: list[float]) -> float | None:
@@ -95,8 +103,18 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
 
     points: list[float] = []
     if not missing_env:
-        for payload in ctx.landing.iter_payloads(source_id):
-            points.extend(_numeric_points(payload))
+        # macro.fred_macro emits multiple series per run (yields + INDPRO +
+        # TCU + TRUCKD11). Restrict to demand series so the slope reflects
+        # real activity, not a mixed-unit soup. iter_payloads yields only
+        # the payload dict, so go through ``read`` to access ``extra.series_id``.
+        for rec in ctx.landing.read(source_id).records:
+            extra_obj: object = getattr(rec, "extra", None)
+            if not isinstance(extra_obj, dict):
+                continue
+            series_id: object = extra_obj.get("series_id")
+            if not isinstance(series_id, str) or series_id not in _DEMAND_SERIES_IDS:
+                continue
+            points.extend(_numeric_points(rec.payload))
 
     if missing_env and not points:
         return demo_result(
@@ -126,7 +144,10 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             note="Could not compute slope — showing demo trend.",
         )
     magnitude = abs(slope)
-    trend_score = (slope / (magnitude + 1e-9)) * min(10.0, magnitude * 100.0)
+    # INDPRO is an index around 100 (monthly). A slope of ~1.0/month is
+    # a ~12% annualized move — already a strong signal. Scale by 10 so the
+    # trend_score saturates at ±10 for monthly slopes of ~1.0+.
+    trend_score = (slope / (magnitude + 1e-9)) * min(10.0, magnitude * 10.0)
     score = max(0.0, min(100.0, 50.0 - trend_score * 5.0))
     status = "good" if trend_score > 0 else "warning" if trend_score > -3 else "bad"
     return ok_result(

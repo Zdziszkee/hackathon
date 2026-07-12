@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 
 from ews_ingest.core.models import Identifiers
 from ews_ingest.dashboard.demo import DemoValues
@@ -37,9 +38,57 @@ ROLES: tuple[str, ...] = (
 )
 
 
-def _gscpi_series(csv_text: str) -> list[float]:
-    """Parse the NY Fed GSCPI CSV: date column + a value column (last)."""
+def _gscpi_series_from_fred_payload(payload: object) -> list[float]:
+    """Extract a numeric series from a FRED-style payload (``observations``)."""
+    if not isinstance(payload, dict):
+        return []
+    obs = payload.get("observations")
+    if not isinstance(obs, list):
+        return []
     out: list[float] = []
+    for row in obs:
+        if not isinstance(row, dict):
+            continue
+        v = row.get("value")
+        if isinstance(v, (int, float)):
+            out.append(float(v))
+        elif isinstance(v, str) and v not in {"", ".", "nan", "NaN"}:
+            try:
+                out.append(float(v))
+            except ValueError:
+                continue
+    return out
+
+
+def _gscpi_series(csv_text: str) -> list[float]:
+    """Parse a supply-chain pressure series from either CSV (NY Fed GSCPI)
+    or FRED-style ``observations`` JSON.
+    """
+    out: list[float] = []
+    # FRED-style: payload has "observations": [{date, value}, ...]
+    if not csv_text:
+        return out
+    try:
+        doc = json.loads(csv_text)
+    except ValueError, TypeError:
+        doc = None
+    if isinstance(doc, dict):
+        obs = doc.get("observations")
+        if isinstance(obs, list):
+            for row in obs:
+                if not isinstance(row, dict):
+                    continue
+                v = row.get("value")
+                if isinstance(v, (int, float)):
+                    out.append(float(v))
+                elif isinstance(v, str) and v not in {"", ".", "nan", "NaN"}:
+                    try:
+                        out.append(float(v))
+                    except ValueError:
+                        continue
+            if out:
+                return out
+    # CSV fallback: date column + value column (last cell).
     for row in csv.reader(io.StringIO(csv_text)):
         if not row:
             continue
@@ -85,10 +134,21 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
     gscpi_z: float | None = None
     if gscpi_sid and not ctx.missing_env(gscpi_sid):
         for payload in ctx.landing.iter_payloads(gscpi_sid):
+            # Two payload shapes are accepted:
+            #   * GSCPI-style:  {"csv": "<csv text>"}
+            #   * FRED-style:   {"observations": [{"date": ..., "value": ...}, ...]}
             csv_text = str(payload.get("csv") or "")
             if csv_text:
                 gscpi_z = _zscore(_gscpi_series(csv_text))
-                break
+                if gscpi_z is not None:
+                    break
+                continue
+            # Try FRED observations directly.
+            series = _gscpi_series_from_fred_payload(payload)
+            if series:
+                gscpi_z = _zscore(series)
+                if gscpi_z is not None:
+                    break
 
     new_orders: float | None = None
     supp_del: float | None = None
@@ -101,23 +161,24 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             new_orders = ism["new_orders"]
             supp_del = ism["supplier_deliveries"]
 
-    partial_missing = (gscpi_z is None) or (new_orders is None and supp_del is None)
-    if missing_env and partial_missing:
+    # Need at least GSCPI to produce a real value; ISM sub-indices are
+    # best-effort enhancements on top.
+    if gscpi_z is None:
+        if missing_env:
+            return demo_result(
+                label_hint="supply_chain",
+                value=f"GSCPI {demo.gscpi():+.2f}",
+                score=50.0 + demo.gscpi() * 20.0,
+                missing_env=tuple(missing_env),
+                source_ids=source_ids,
+                note="API key(s) missing and no GSCPI data landed — showing demo.",
+            )
         return demo_result(
             label_hint="supply_chain",
             value=f"GSCPI {demo.gscpi():+.2f}",
             score=50.0 + demo.gscpi() * 20.0,
-            missing_env=tuple(missing_env),
             source_ids=source_ids,
-            note="API key(s) missing and not enough landed data — showing demo.",
-        )
-    if partial_missing:
-        return demo_result(
-            label_hint="supply_chain",
-            value=f"GSCPI {demo.gscpi():+.2f}",
-            score=50.0 + demo.gscpi() * 20.0,
-            source_ids=source_ids,
-            note="GSCPI or ISM sub-indices not found in landed data — showing demo.",
+            note="No GSCPI data landed — showing demo.",
         )
 
     pieces: list[float] = []

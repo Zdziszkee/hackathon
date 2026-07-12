@@ -395,11 +395,20 @@
 
 - source_id: news.gdelt
   host: api.gdeltproject.org
-  rps: 1.0
+  rps: 0.2
   burst: 1
   retries: 3
   enabled: true
   backfill: 18mo
+  scope: per_entity
+
+- source_id: news.hackernews
+  host: hn.algolia.com
+  rps: 1.0
+  burst: 1
+  retries: 3
+  enabled: true
+  backfill: 12mo
   scope: per_entity
 
 - source_id: news.mastodon

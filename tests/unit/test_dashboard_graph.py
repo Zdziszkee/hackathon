@@ -6,7 +6,7 @@ import pandas as pd
 from ews_ingest.dashboard.graph import (
     CompanyGraph,
     build_correlation_edges,
-    build_granger_edges,
+    build_correlation_edges_from_returns,
     select_focus_from_returned,
 )
 
@@ -61,7 +61,7 @@ def test_focus_none_when_nothing_selected() -> None:
     assert select_focus_from_returned(None) is None
 
 
-def test_granger_detects_known_lead_lag() -> None:
+def test_correlation_edges_from_returns_every_to_every() -> None:
     rng = np.random.default_rng(0)
     n = 200
     a = rng.standard_normal(n)
@@ -76,5 +76,11 @@ def test_granger_detects_known_lead_lag() -> None:
         "B": pd.Series(b, index=idx, name="B"),
         "C": pd.Series(c, index=idx, name="C"),
     }
-    edges = build_granger_edges(series, maxlag=3, alpha=0.05)
+    edges = build_correlation_edges_from_returns(series)
+    # every-to-every: A->B, A->C, B->A, B->C, C->A, C->B
+    assert len(edges) == 6
     assert any(src == "A" and tgt == "B" for src, tgt, _ in edges)
+    # weight is signed Pearson correlation; A->B should be positive (synthetic lead-lag)
+    a_to_b = next((w for s, t, w in edges if s == "A" and t == "B"), None)
+    assert a_to_b is not None
+    assert a_to_b > 0

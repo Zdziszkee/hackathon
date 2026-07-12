@@ -14,6 +14,7 @@ __all__ = [
     "ic_bar_chart",
     "ic_boxes",
     "ic_building",
+    "ic_chart_up",
     "ic_check",
     "ic_chevron_down",
     "ic_dashed",
@@ -31,12 +32,15 @@ __all__ = [
     "ic_message",
     "ic_minus",
     "ic_newspaper",
+    "ic_percent",
     "ic_plus",
     "ic_scale",
     "ic_search",
     "ic_shield",
     "ic_trending",
     "ic_truck",
+    "ic_user_minus",
+    "ic_users",
     "ic_zap",
 ]
 
@@ -232,6 +236,47 @@ def ic_zap(size: int = 16) -> str:
     return Icon(
         size,
         '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+    )
+
+
+def ic_users(size: int = 16) -> str:
+    """Two-person silhouette — insider / WARN layoffs / workforce signals."""
+    return Icon(
+        size,
+        '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>'
+        '<circle cx="9" cy="7" r="4"/>'
+        '<path d="M22 21v-2a4 4 0 0 0-3-3.87"/>'
+        '<path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+    )
+
+
+def ic_percent(size: int = 16) -> str:
+    """Percent sign — credit spreads, rates, ratios."""
+    return Icon(
+        size,
+        '<line x1="19" x2="5" y1="5" y2="19"/>'
+        '<circle cx="6.5" cy="6.5" r="2.5"/>'
+        '<circle cx="17.5" cy="17.5" r="2.5"/>',
+    )
+
+
+def ic_user_minus(size: int = 16) -> str:
+    """Person with minus — layoffs, workforce reduction."""
+    return Icon(
+        size,
+        '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>'
+        '<circle cx="9" cy="7" r="4"/>'
+        '<line x1="22" x2="16" y1="11" y2="11"/>',
+    )
+
+
+def ic_chart_up(size: int = 16) -> str:
+    """Upward-trending bar chart — earnings beat / positive surprise."""
+    return Icon(
+        size,
+        '<line x1="3" x2="21" y1="21" y2="21"/>'
+        '<polyline points="6 17 11 11 14 14 19 7"/>'
+        '<polyline points="19 7 19 12 14 12"/>',
     )
 
 

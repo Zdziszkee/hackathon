@@ -145,13 +145,32 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
         )
     revenues, rev_end = _concept_value(concepts, _REVENUE_TAGS)
     net, net_end = _concept_value(concepts, _NET_INCOME_TAGS)
-    if not revenues:
+    if revenues is None and net is None:
         return demo_result(
             label_hint="profitability",
             value=rf"{demo.net_margin():+.1f}%",
             score=max(0.0, 60.0 - demo.net_margin() * 2.0),
             source_ids=(source_id,),
-            note="Revenue tags not found in XBRL — showing demo margin.",
+            note="Revenue + net-income tags not found in XBRL — showing demo margin.",
+        )
+    if revenues is None and net is not None:
+        # Pre-revenue / SPAC-style filer: revenue tag absent but net income
+        # is reported. Show the raw net income as a real number with a
+        # clear note rather than a misleading demo margin.
+        score = 50.0 if net >= 0 else 80.0
+        return SignalResult(
+            value=rf"{net:+,.0f}",
+            score=score,
+            status=cast_status("good" if net >= 0 else "warning"),
+            detail={
+                "revenues": None,
+                "net_income": net,
+                "revenue_period": "",
+                "net_income_period": net_end,
+                "pre_revenue": True,
+            },
+            source_ids=(source_id,),
+            note="No revenue reported (likely SPAC / pre-revenue) — net income shown.",
         )
     if net is None:
         return demo_result(
@@ -161,7 +180,15 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             source_ids=(source_id,),
             note="NetIncome tags not found in XBRL — showing demo margin.",
         )
-    margin = net / revenues * 100.0
+    if net is None:
+        return demo_result(
+            label_hint="profitability",
+            value=rf"{demo.net_margin():+.1f}%",
+            score=max(0.0, 60.0 - demo.net_margin() * 2.0),
+            source_ids=(source_id,),
+            note="NetIncome tags not found in XBRL — showing demo margin.",
+        )
+    margin = (net or 0) / (revenues or 1) * 100.0
     score = max(0.0, min(100.0, 50.0 - margin * 2.0))
     status = "good" if margin > 10 else "warning" if margin > 0 else "bad"
     return ok_result(

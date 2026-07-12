@@ -3,10 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, NamedTuple
 
-import numpy as np
 import pandas as pd
-from statsmodels.stats.multitest import multipletests
-from statsmodels.tsa.stattools import grangercausalitytests
 from yfiles_graphs_for_streamlit import Node
 
 _SECTOR_EDGE_WEIGHT = 0.75
@@ -16,21 +13,19 @@ _MAX_EDGES = 30
 _UNKNOWN_SECTOR = "Unknown"
 
 
-def build_granger_edges(
+def build_correlation_edges_from_returns(
     returns: dict[str, pd.Series],
-    maxlag: int = 5,
-    alpha: float = 0.05,
     min_obs: int = 40,
 ) -> list[tuple[str, str, float]]:
-    """Pairwise Granger causality on returns (or earnings surprises).
+    """Build **every-to-every** directed correlation edges from return series.
 
-    Returns directed edges (source, target, weight) where weight = Pearson
-    correlation between the source and target return series (signed).
-    Only edges whose Granger F-test survives FDR correction at ``alpha`` are kept.
+    Returns one directed edge per ordered pair (a, b) with a != b. Weight is
+    the signed Pearson correlation between the two companies' return series.
+    No significance filter is applied; the dashboard graph shows the full
+    every-to-every view. Caller may cap, sort, or style as desired.
     """
     tickers = list(returns.keys())
-    raw_p: list[float] = []
-    pairs: list[tuple[str, str, float, float]] = []  # (a, b, p, corr)
+    edges: list[tuple[str, str, float]] = []
 
     for a in tickers:
         for b in tickers:
@@ -44,28 +39,14 @@ def build_granger_edges(
             if len(df) < min_obs:
                 continue
             try:
-                gc = grangercausalitytests(df[[b, a]], maxlag=maxlag, verbose=False)
-                ps = [gc[lag][0]["ssr_chi2test"][1] for lag in range(1, maxlag + 1)]
-                p = min(ps)
                 corr = float(df[a].corr(df[b]))
-                raw_p.append(p)
-                pairs.append((a, b, p, corr))
+                edges.append((a, b, corr))
             except Exception as exc:
-                logging.getLogger(__name__).debug("granger %s->%s failed: %s", a, b, exc)
+                logging.getLogger(__name__).debug("corr %s<->%s failed: %s", a, b, exc)
                 continue
 
-    if not pairs:
-        return []
-
-    _, p_fdr, _, _ = multipletests(raw_p, alpha=alpha, method="fdr_bh")
-
-    edges: list[tuple[str, str, float]] = []
-    for (a, b, _p, corr), p_corr in zip(pairs, p_fdr, strict=True):
-        if p_corr < alpha:
-            edges.append((a, b, corr))
-
     edges.sort(key=lambda x: -abs(x[2]))
-    return edges[:_MAX_EDGES]
+    return edges
 
 
 class CompanyGraph(NamedTuple):
@@ -89,7 +70,7 @@ def build_correlation_edges(
         # filter to companies we have
         tickers = {c.ticker for c in companies}
         filtered_returns = {t: s for t, s in returns.items() if t in tickers}
-        return build_granger_edges(filtered_returns)
+        return build_correlation_edges_from_returns(filtered_returns)
 
     # heuristic fallback (current behavior)
     edges: list[tuple[str, str, float]] = []
