@@ -7,12 +7,13 @@ zone is empty; asserts the ISM page-text parser and GSCPI CSV parser.
 
 from __future__ import annotations
 
-import json
 import math
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast, override
+
+import yaml
 
 from ews_ingest.core.hashing import content_hash
 from ews_ingest.core.models import Identifiers, RawFormat, RawRecord, SourceType
@@ -100,15 +101,15 @@ def test_list_providers_discovers_all_indicators() -> None:
     assert not missing
 
 
-def test_load_companies_is_empty_without_json(tmp_path: Path) -> None:
-    # no json, no yaml (hardcoded removed)
-    path = tmp_path / "companies.json"
+def test_load_companies_is_empty_without_file(tmp_path: Path) -> None:
+    # no file
+    path = tmp_path / "companies.yaml"
     companies = load_companies(path)
     assert companies == []
 
 
-def test_load_companies_reads_from_json(tmp_path: Path) -> None:
-    path = tmp_path / "companies.json"
+def test_load_companies_reads_from_yaml(tmp_path: Path) -> None:
+    path = tmp_path / "companies.yaml"
     data = [
         {
             "ticker": "UPS",
@@ -117,7 +118,7 @@ def test_load_companies_reads_from_json(tmp_path: Path) -> None:
             "extra_ids": {"sector": "transport_logistics"},
         }
     ]
-    path.write_text(json.dumps(data))
+    path.write_text(yaml.safe_dump(data))
     companies = load_companies(path)
     assert len(companies) == 1
     assert companies[0].identifiers.ticker == "UPS"

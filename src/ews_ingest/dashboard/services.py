@@ -1,7 +1,7 @@
 """Service wiring for the Streamlit dashboard.
 
-The companies list is **always read fresh** from the on-disk JSON
-(`data/companies/companies.json` or EWS_COMPANIES_PATH) so that
+The companies list is **always read fresh** from the SQLite DB
+(table `companies` under EWS_DB_PATH or ./data/ews.db) so that
 stocks added/removed in the UI survive full program restarts and
 appear instantly on next launch.
 
@@ -26,7 +26,7 @@ from ews_ingest.core.models import RawFormat, RawRecord, SourceType, utc_now
 from ews_ingest.core.protocol import Scope
 from ews_ingest.core.registry import all_source_ids, get_source, pick_sources
 from ews_ingest.dashboard.bindings import IndicatorBindings, load_bindings
-from ews_ingest.dashboard.companies import Company, load_companies
+from ews_ingest.dashboard.companies import Company
 from ews_ingest.dashboard.company_store import CompanyStore
 from ews_ingest.dashboard.db import HistoricalStore
 from ews_ingest.dashboard.env import EnvResolver
@@ -41,7 +41,6 @@ __all__ = [
     "CONFIG_DIR",
     "Inputs",
     "bust_inputs_cache",
-    "companies_path",
     "get_bindings",
     "get_inputs",
     "make_company_store",
@@ -53,6 +52,7 @@ __all__ = [
     "make_services_from_env",
     "make_signal_ctx",
     "make_ticker_suggest",
+    "trigger_refresh",
 ]
 
 
@@ -67,21 +67,6 @@ Inputs = tuple[
     CompanyStore,
     TickerSuggest,
 ]
-
-
-# ---------------------------------------------------------------------------
-# Path helpers
-# ---------------------------------------------------------------------------
-
-
-def companies_path() -> Path:
-    """Resolve the dynamic JSON company-store path (env-overridable)."""
-    return Path(
-        os.environ.get(
-            "EWS_COMPANIES_PATH",
-            Path(os.environ.get("EWS_COMPANIES_DIR", "./data/companies")) / "companies.json",
-        )
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -149,10 +134,10 @@ def trigger_refresh(ticker: str | None = None, *, blocking: bool = False) -> Non
                 ctx = build_context(services, sid, "force-" + (ticker or "global"))
                 logger.debug("fetching source %s for %s", sid, ticker or "global")
                 if ticker:
-                    # find the company (load from disk; thread-safe copy)
-                    for comp in load_companies(companies_path()):
-                        if (comp.identifiers.ticker or "").upper() == ticker.upper():
-                            ctx.resolver = YamlEntityResolver([comp.identifiers])
+                    # find the company from SQLite (single source of truth)
+                    for ident in hist.list_companies():
+                        if (ident.ticker or "").upper() == ticker.upper():
+                            ctx.resolver = YamlEntityResolver([ident])
                             break
                 source = get_source(sid)
                 batch_size = 100
@@ -316,8 +301,9 @@ def make_company_store(
     """
     if http is None:
         http = make_http_client()
+    db_path = Path(os.environ.get("EWS_DB_PATH", "./data/ews.db"))
     return CompanyStore(
-        companies_path(),
+        db_path,
         http=http,
         landing_lookup=landing_lookup_factory(landing),
         sector_lookup=sector_lookup,
@@ -339,17 +325,18 @@ def make_signal_ctx(
 def make_services_from_env() -> Services:
     """Build a :class:`Services` bundle rooted at the env-configured paths.
 
-    Used by the onboarding orchestrator — the rest of the dashboard uses
-    the smaller DI pair above because :class:`CompanyStore` and the
-    ticker suggester don't need the full bundle.
+    Companies are loaded from the DB (not a file path).
     """
-    from ews_ingest.cli import _default_entities_path  # noqa: PLC0415 - lazy to avoid cli cycle
+    db_path = Path(os.environ.get("EWS_DB_PATH", "./data/ews.db"))
+    hist = HistoricalStore(db_path)
+    entities = hist.list_companies()
 
     return make_services(
         landing_dir=Path(os.environ.get("EWS_LANDING_DIR", "./data/landing")),
-        entities_path=_default_entities_path(),
+        entities_path=CONFIG_DIR / "entities.yaml",  # may not exist
         sources_path=CONFIG_DIR / "sources.yaml",
         sec_user_agent=os.environ.get("SEC_USER_AGENT"),
+        entities=entities or None,
     )
 
 
@@ -360,7 +347,7 @@ def make_services_from_env() -> Services:
 
 @lru_cache(maxsize=1)
 def _get_cached_inputs() -> tuple[LandingReader, EnvResolver, CompanyStore, TickerSuggest]:
-    """Cached heavy parts; companies list is always read fresh from disk below."""
+    """Cached heavy parts; companies list is always read fresh from DB (via store.load) below."""
     landing = make_landing_reader()
     http = make_http_client()
     sector_lookup = make_sector_lookup(http=http)
@@ -371,12 +358,12 @@ def _get_cached_inputs() -> tuple[LandingReader, EnvResolver, CompanyStore, Tick
 
 
 def get_inputs() -> Inputs:
-    """Always returns fresh companies list from the persisted JSON (so dashboard
-    edits survive full program restarts and load instantly). Other readers are
-    cached until bust_inputs_cache().
+    """Always returns fresh companies list from the SQLite DB (migrated from JSON).
+    Other readers are cached until bust_inputs_cache().
     """
     landing, env, store, suggest = _get_cached_inputs()
-    companies = load_companies(store.path)
+    idents = store.load()  # now DB-backed via CompanyStore (list[Identifiers])
+    companies = [Company(identifiers=i) for i in idents]
     return (companies, landing, env, store, suggest)
 
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from dataclasses import dataclass
@@ -84,19 +83,11 @@ class Services:
 
 
 def load_entities_file(path: Path) -> list[Identifiers]:
-    """Read a company universe from a JSON or YAML file.
-
-    Both formats share the same ``Identifiers`` schema (an array of
-    ``Identifiers``-shaped dicts). The dashboard persists companies to JSON
-    (:mod:`ews_ingest.dashboard.company_store`); the legacy ``entities.yaml``
-    is supported for backfill and integration tests.
-    """
+    """Read static company universe from YAML (JSON removed; dynamic in DB)."""
     if not path.exists():
         return []
-    if path.suffix == ".json":
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    else:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or []
+    # Only YAML for static entities now
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or []
     if isinstance(raw, dict):
         raw = raw.get("companies") if "companies" in raw else raw
     if not isinstance(raw, list):
@@ -111,12 +102,12 @@ def make_services(
     entities_path: Path,
     sources_path: Path,
     sec_user_agent: str | None = None,
+    entities: list[Identifiers] | None = None,
 ) -> Services:
     """Build the shared service bundle from config paths + env.
 
-    ``entities_path`` may point to either ``entities.yaml`` (legacy, hand-curated)
-    or ``companies.json`` (dynamic, edited from the dashboard). The on-disk
-    schema is identical so both go through :func:`load_entities_file`.
+    If ``entities`` list is provided, it is used directly for the resolver
+    (the live list now comes from the SQLite DB in normal use).
     """
     logger = logging.getLogger("ews_ingest")
     if not logger.handlers:
@@ -126,11 +117,12 @@ def make_services(
         logger.setLevel(logging.INFO)
         logger.propagate = False
     http = HttpClient(sec_user_agent=sec_user_agent)
+    ents = entities if entities is not None else load_entities_file(entities_path)
     return Services(
         http=http,
         scraper=Scraper(http),
         writer=JsonlLandWriter(landing_dir),
-        resolver=YamlEntityResolver(load_entities_file(entities_path)),
+        resolver=YamlEntityResolver(ents),
         logger=logger,
         sources=load_sources(sources_path),
     )

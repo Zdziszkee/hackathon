@@ -6,11 +6,15 @@ Ingestion (datasources) feed it independently.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from ews_ingest.core.models import Identifiers
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +56,27 @@ class HistoricalStore:
             "CREATE INDEX IF NOT EXISTS idx_ticker_src_time "
             "ON records (ticker, source_id, fetched_at)"
         )
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS companies (
+                ticker TEXT PRIMARY KEY,
+                cik TEXT,
+                name TEXT,
+                extra_ids TEXT NOT NULL DEFAULT '{}',
+                added_at TEXT
+            )
+            """
+        )
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS universe_tickers (
+                ticker TEXT PRIMARY KEY,
+                cik TEXT,
+                name TEXT,
+                fetched_at TEXT
+            )
+            """
+        )
         self._conn.commit()
 
     def write_records(
@@ -83,6 +108,20 @@ class HistoricalStore:
             except Exception:  # noqa: S112
                 continue  # ignore bad record
         self._conn.commit()
+
+        # Mirror universe tickers into dedicated table for SQL resolution
+        if source_id == "universe.sec_company_tickers":
+            for rec in records:
+                p = rec.get("payload") or {}
+                tk = str(p.get("ticker") or "").upper()
+                if tk:
+                    with contextlib.suppress(Exception):
+                        self.upsert_universe_ticker(
+                            tk,
+                            str(p.get("cik")) if p.get("cik") is not None else None,
+                            p.get("name"),
+                            rec.get("fetched_at"),
+                        )
         return written
 
     def get_last_update(self, ticker: str, source_id: str | None = None) -> str | None:
@@ -130,6 +169,110 @@ class HistoricalStore:
             }
             for r in rows
         ]
+
+    # ------------------------------------------------------------------
+    # Companies (portfolio) stored in the same DB for stack simplification
+    # ------------------------------------------------------------------
+
+    def list_companies(self) -> list[Identifiers]:
+        """Return all companies from the DB as Identifiers."""
+        rows = self._conn.execute(
+            "SELECT ticker, cik, name, extra_ids FROM companies ORDER BY ticker"
+        ).fetchall()
+        out: list[Identifiers] = []
+        for r in rows:
+            extra = json.loads(r["extra_ids"] or "{}")
+            out.append(
+                Identifiers(
+                    ticker=r["ticker"],
+                    cik=r["cik"] or None,
+                    name=r["name"] or None,
+                    extra_ids=extra,
+                )
+            )
+        return out
+
+    def upsert_company(self, identifier: Identifiers) -> None:
+        """Insert or replace a company (used by CompanyStore on add)."""
+        added_at = datetime.now(UTC).isoformat()
+        extra = json.dumps(identifier.extra_ids or {})
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO companies (ticker, cik, name, extra_ids, added_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                (identifier.ticker or "").upper(),
+                identifier.cik,
+                identifier.name,
+                extra,
+                added_at,
+            ),
+        )
+        self._conn.commit()
+
+    def remove_company(self, ticker: str) -> bool:
+        """Remove company by ticker. Returns True if removed."""
+        t = (ticker or "").upper()
+        cur = self._conn.execute("DELETE FROM companies WHERE ticker = ?", (t,))
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    def get_company(self, ticker: str) -> Identifiers | None:
+        """Fetch one company if present."""
+        t = (ticker or "").upper()
+        row = self._conn.execute(
+            "SELECT ticker, cik, name, extra_ids FROM companies WHERE ticker = ?",
+            (t,),
+        ).fetchone()
+        if not row:
+            return None
+        extra = json.loads(row["extra_ids"] or "{}")
+        return Identifiers(
+            ticker=row["ticker"],
+            cik=row["cik"] or None,
+            name=row["name"] or None,
+            extra_ids=extra,
+        )
+
+    # ------------------------------------------------------------------
+    # Universe tickers (master CIK/ticker list from sec_company_tickers)
+    # ------------------------------------------------------------------
+
+    def upsert_universe_ticker(
+        self, ticker: str, cik: str | None, name: str | None, fetched_at: str | None = None
+    ) -> None:
+        """Insert or replace a universe ticker entry."""
+        t = (ticker or "").upper()
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO universe_tickers (ticker, cik, name, fetched_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (t, cik, name, fetched_at),
+        )
+        self._conn.commit()
+
+    def get_universe_ticker(self, ticker: str) -> dict[str, Any] | None:
+        """Return universe entry for ticker if present."""
+        t = (ticker or "").upper()
+        row = self._conn.execute(
+            "SELECT ticker, cik, name FROM universe_tickers WHERE ticker = ?",
+            (t,),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "ticker": row["ticker"],
+            "cik": row["cik"],
+            "name": row["name"],
+        }
+
+    def list_universe_tickers(self) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT ticker, cik, name FROM universe_tickers ORDER BY ticker"
+        ).fetchall()
+        return [{"ticker": r["ticker"], "cik": r["cik"], "name": r["name"]} for r in rows]
 
     def close(self) -> None:
         self._conn.close()

@@ -1,9 +1,6 @@
-"""Company universe loader: YAML or JSON file -> runtime company view.
+"""Company universe loader: YAML (preferred) or JSON (legacy compat) -> runtime view.
 
-The dashboard persists its universe to a JSON file (see
-:mod:`ews_ingest.dashboard.company_store`); the legacy ``entities.yaml`` is
-still supported (and used by integration tests) so the loader dispatches on the
-file extension. Either source produces the same :class:`Identifiers` schema.
+Used for static entities.yaml and test fixtures. Live portfolio is in SQLite DB.
 """
 
 from __future__ import annotations
@@ -45,12 +42,13 @@ class Company:
 def _read_raw(path: Path) -> list[dict[str, object]]:
     if not path.exists():
         return []
+    # JSON support removed for entity files; use YAML for static/legacy
     if path.suffix == ".json":
+        # legacy compat only
         data = json.loads(path.read_text(encoding="utf-8"))
     else:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or []
     if isinstance(data, dict):
-        # Some YAML files wrap the universe in a top-level key (e.g. ``companies:``)
         entries = data.get("companies") if "companies" in data else data
     else:
         entries = data
@@ -58,9 +56,5 @@ def _read_raw(path: Path) -> list[dict[str, object]]:
 
 
 def load_companies(path: Path) -> list[Company]:
-    """Load ``entities.yaml`` OR ``companies.json`` -> list of :class:`Company`.
-
-    The on-disk schema is identical (a JSON/YAML array of ``Identifiers``-shaped
-    dicts), so this loader transparently supports both backends.
-    """
+    """Load a static entities file (yaml or json) for tests / legacy config."""
     return [Company(identifiers=Identifiers.model_validate(entry)) for entry in _read_raw(path)]

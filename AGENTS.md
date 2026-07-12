@@ -46,7 +46,7 @@ See src/ews_ingest/cli.py for details. SEC_USER_AGENT always required.
 
 - Reads JSONL from `data/landing/` (EWS_LANDING_DIR); demo values when empty.
 - Indicators: auto-discover `Provider: SignalProvider` instances under `src/ews_ingest/dashboard/signals/` (pkgutil). Bind role → source_id in `src/ews_ingest/config/indicators.yaml`.
-- Companies: dashboard mutates `data/companies/companies.json`; falls back to `src/ews_ingest/config/entities.yaml`.
+- Companies: stored in the shared SQLite DB (`data/ews.db` or EWS_DB_PATH, table `companies`). Falls back to `src/ews_ingest/config/entities.yaml` for static lists.
 
 ## Adding ingestion sources
 

@@ -1,36 +1,19 @@
-"""Dynamic company store: persistent JSON-backed portfolio the dashboard can edit.
+"""Dynamic company store backed by the shared SQLite DB (table `companies`).
 
-Replaces the static ``config/entities.yaml`` universe with a runtime-extensible
-list keyed by ticker. Adding a company only needs a ticker — the store resolves
-CIK + legal name + SIC-derived sector from SEC EDGAR (either from the landed
-``universe.sec_company_tickers`` dataset, or a live EDGAR lookup if no record
-has landed yet).
-
-Decoupling from the ingestion layer is preserved:
-
-* the store lives in ``dashboard/`` (UI concern), persists to a JSON file the
-  ingestion layer also reads via ``config.py::_load_entities`` — both sides
-  agree on the file format but neither imports the other;
-* the SEC onboarding calls reuse the existing :mod:`ews_ingest.providers.sec`
-  transport — no new provider, no new source;
-* sector derivation reuses the canonical SIC→sector map shared with the
-  ``industry`` signal so the rest of the pipeline keeps working unchanged.
-
-The JSON schema is identical to ``entities.yaml`` (one ``Identifiers`` per
-entry) so existing loaders / tests treat both transparently.
+Replaces the static ``config/entities.yaml`` with a runtime-extensible list.
+Add uses ticker resolution (SEC + sector lookup) and persists to DB.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Callable
 from pathlib import Path
 from threading import RLock
-from typing import Any
 
 from ews_ingest.core.http import HttpClient, RatePolicy
 from ews_ingest.core.models import Identifiers
+from ews_ingest.dashboard.db import HistoricalStore
 from ews_ingest.dashboard.yahoo_sector import SectorLookup, SectorLookupError
 
 __all__ = ["CompanyStore", "TickerResolutionError"]
@@ -56,53 +39,40 @@ def _sic_from_value(sic: object) -> str | None:
 
 
 class CompanyStore:
-    """JSON-backed portfolio the dashboard edits and the ingestion layer reads.
+    """SQLite-backed portfolio (migrated from JSON).
 
-    The on-disk format is a JSON array of ``Identifiers``-shaped dicts::
+    Companies are now stored in the same SQLite DB as historical records
+    (table "companies") to simplify the stack to a single storage backend.
 
-        [{"ticker": "UPS", "cik": "0001090727", "name": "UNITED PARCEL SERVICE",
-          "extra_ids": {"sector": "transport_logistics", "country": "US"}}, ...]
-
-    This is byte-identical (semantically) to ``entities.yaml`` so the existing
-    loaders and tests treat either path without branching on the format.
+    The in-memory / resolver format remains ``Identifiers``.
     """
 
     def __init__(
         self,
-        path: Path,
+        db_path: Path,
         *,
         http: HttpClient | None = None,
         landing_lookup: Callable[[str], list[dict[str, object]]] | None = None,
         sector_lookup: SectorLookup | None = None,
     ) -> None:
-        self._path = path
+        self._db_path = db_path
         self._http = http
         self._lock = RLock()
-        # Landing zone lookup: ``ticker -> list[landed payload row]``. Optional
-        # so this module can be constructed in tests without an ingestion layer.
+        # Landing zone lookup...
         self._landing_lookup = landing_lookup
-        # Optional sector lookup (Yahoo Finance ``quoteSummary``). When
-        # omitted, companies are added without a sector — the signal layer
-        # renders "unavailable" for sector-routed indicators.
         self._sector_lookup = sector_lookup
+        # Internal store for persistence (same DB file as records)
+        self._hist = HistoricalStore(db_path)
 
     @property
     def path(self) -> Path:
-        return self._path
+        """The DB path used for this store."""
+        return self._db_path
 
     # ------------------------------------------------------------------ load
     def load(self) -> list[Identifiers]:
-        """Read every company from the JSON file (empty list if absent)."""
-        if not self._path.exists():
-            return []
-        try:
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            _log.warning("companies file %s is corrupt — treating as empty", self._path)
-            return []
-        if not isinstance(raw, list):
-            return []
-        return [Identifiers.model_validate(entry) for entry in raw]
+        """Read companies from the SQLite DB (empty list if none)."""
+        return self._hist.list_companies()
 
     # -------------------------------------------------------------- mutations
     def add_ticker(self, ticker: str) -> Identifiers:
@@ -110,8 +80,8 @@ class CompanyStore:
 
         Resolution priority:
         1. Already in the store → return the existing entry (idempotent re-add).
-        2. Landed ``universe.sec_company_tickers`` JSONL records.
-        3. Live SEC ``company_tickers.json`` lookup.
+        2. Universe tickers from SQLite (populated by universe.sec_company_tickers source).
+        3. Live SEC lookup.
 
         Sector is fetched dynamically via the injected ``sector_lookup``
         (default: Yahoo Finance ``quoteSummary``). Failures are caught —
@@ -147,12 +117,7 @@ class CompanyStore:
         a row was actually removed."""
         ticker = ticker.strip().upper()
         with self._lock:
-            entities = self.load()
-            kept = [e for e in entities if (e.ticker or "").upper() != ticker]
-            removed = len(kept) != len(entities)
-            if removed:
-                self._persist_all(kept)
-            return removed
+            return self._hist.remove_company(ticker)
 
     # --------------------------------------------------------------- helpers
     def _find_in_store(self, ticker: str) -> Identifiers | None:
@@ -164,11 +129,10 @@ class CompanyStore:
     def _resolve_ticker(self, ticker: str) -> tuple[str, str]:
         """Return ``(cik_zero_padded, name)`` for ``ticker``.
 
-        Prefer landed ``universe.sec_company_tickers`` JSONL (no API key
-        required, kept in sync by the existing ingestion connector); fall back
-        to a live SEC ``company_tickers.json`` lookup when nothing has landed.
+        Prefer universe tickers from SQLite (populated from sec_company_tickers source);
+        fall back to landed data or live SEC lookup.
         """
-        cik, name = self._resolve_from_landing(ticker)
+        cik, name = self._resolve_from_universe(ticker)
         if cik is None and self._http is not None:
             cik, name = self._resolve_from_sec(ticker)
         if cik is None or name is None:
@@ -176,7 +140,16 @@ class CompanyStore:
             raise TickerResolutionError(msg)
         return cik, name
 
-    def _resolve_from_landing(self, ticker: str) -> tuple[str | None, str | None]:
+    def _resolve_from_universe(self, ticker: str) -> tuple[str | None, str | None]:
+        # Prefer SQL universe (populated when universe.sec_company_tickers records written)
+        if self._hist:
+            u = self._hist.get_universe_ticker(ticker)
+            if u and u.get("cik"):
+                cik = str(u["cik"])
+                if cik.isdigit():
+                    cik = cik.zfill(10)
+                return cik, u.get("name")
+        # Fallback to legacy landing lookup if provided
         if self._landing_lookup is None:
             return None, None
         for row in self._landing_lookup(_LANDING_TICKERS_SOURCE):
@@ -186,7 +159,6 @@ class CompanyStore:
             if cik_raw in (None, ""):
                 continue
             cik = str(cik_raw)
-            # Landings may carry either a zero-padded string or an int cik.
             if cik.isdigit():
                 cik = cik.zfill(10)
             name = str(row.get("name") or "")
@@ -276,15 +248,6 @@ class CompanyStore:
             return None
         return _sic_from_value(raw.get("sicDescription") or raw.get("sic") or raw.get("sicCode"))
 
-    # --------------------------------------------------------------- persist
+    # --------------------------------------------------------------- persist (now via SQLite)
     def _persist_append(self, entity: Identifiers) -> None:
-        entities = self.load()
-        entities.append(entity)
-        self._persist_all(entities)
-
-    def _persist_all(self, entities: list[Identifiers]) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        payload: list[dict[str, Any]] = [e.model_dump(mode="json") for e in entities]
-        tmp = self._path.with_suffix(self._path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        tmp.replace(self._path)
+        self._hist.upsert_company(entity)

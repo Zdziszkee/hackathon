@@ -277,13 +277,10 @@ def build_onboarding(
 ) -> PortfolioOnboarding:
     """Build a :class:`PortfolioOnboarding` from the standard service bundle.
 
-    Reads ``EWS_LANDING_DIR`` (default ``./data/landing``), the
-    ``companies.json`` or ``entities.yaml`` path (via the same rules as
-    :mod:`ews_ingest.cli`), and ``config/sources.yaml``.
+    Reads ``EWS_LANDING_DIR`` (default ``./data/landing``),
+    companies from the DB, and ``config/sources.yaml``.
 
-    The ``landing_dir`` override exists for tests; the CLI path should
-    use :func:`ews_ingest.cli._services_from_env` directly via
-    :class:`PortfolioOnboarding`'s public constructor.
+    The ``landing_dir`` override exists for tests.
     """
     from ews_ingest.cli import _services_from_env  # noqa: PLC0415 - cycle
 

@@ -21,6 +21,7 @@ from ews_ingest.dashboard.company_store import (
     CompanyStore,
     TickerResolutionError,
 )
+from ews_ingest.dashboard.db import HistoricalStore
 from ews_ingest.dashboard.onboarding import PortfolioOnboarding
 
 BATCH = 500
@@ -109,9 +110,9 @@ def cmd_onboard(args: argparse.Namespace, services: Services) -> int:
         print("ticker must not be empty", file=sys.stderr)
         return 2
 
-    companies_path = _default_entities_path()
+    db_path = Path(os.environ.get("EWS_DB_PATH", "./data/ews.db"))
     http = HttpClient(sec_user_agent=os.environ.get("SEC_USER_AGENT"))
-    store = CompanyStore(companies_path, http=http)
+    store = CompanyStore(db_path, http=http)
     try:
         identifier = store.add_ticker(ticker)
     except TickerResolutionError as exc:
@@ -151,26 +152,19 @@ def cmd_onboard(args: argparse.Namespace, services: Services) -> int:
     return 0
 
 
-def _default_entities_path() -> Path:
-    """Resolve the company universe path.
-
-    Uses only the dynamic JSON store (``./data/companies/companies.json``,
-    editable from the dashboard via :mod:`ews_ingest.dashboard.company_store`).
-    """
-    explicit = os.environ.get("EWS_COMPANIES_PATH")
-    if explicit:
-        return Path(explicit)
-    return Path(os.environ.get("EWS_COMPANIES_DIR", "./data/companies")) / "companies.json"
-
-
 def _services_from_env() -> Services:
     landing_dir = Path(os.environ.get("EWS_LANDING_DIR", "./data/landing"))
     base = Path(__file__).resolve().parent
+    db_path = Path(os.environ.get("EWS_DB_PATH", "./data/ews.db"))
+    # Companies are stored in the SQLite DB.
+    hist = HistoricalStore(db_path)
+    entities = hist.list_companies()
     return make_services(
         landing_dir=landing_dir,
-        entities_path=_default_entities_path(),
+        entities_path=base / "config" / "entities.yaml",
         sources_path=base / "config" / "sources.yaml",
         sec_user_agent=os.environ.get("SEC_USER_AGENT"),
+        entities=entities or None,
     )
 
 

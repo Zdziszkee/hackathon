@@ -128,11 +128,9 @@ def _render_correlation_graph(computed: list[CompanyResult]) -> None:
 def _ensure_data_for_new_companies(companies: list[Company], hist: HistoricalStore) -> None:
     """Kick off a background fetch for any company that has no DB records yet.
 
-    If a user adds a company (via UI or by editing companies.json) without
-    running its per-entity sources, signals fall back to demo values. This
-    detects tickers missing from the historical store and fires a non-blocking
-    refresh. The pending state + fingerprint cache ensure the next render
-    picks up real data when it lands.
+    If a user adds a company without running its per-entity sources, signals
+    fall back to demo values. This detects tickers missing from the historical
+    store and fires a non-blocking refresh.
     """
     pending = st.session_state.setdefault("pending_refreshes", {})
     newly_fetched: list[str] = []
@@ -285,7 +283,7 @@ def main() -> None:
         Action only on button click; then full rerun so graph + overview + topbar
         update with the new company set.
         """
-        # Fresh companies from persisted JSON (instant on open/restart).
+        # Fresh companies from SQLite DB (instant on open/restart).
         # Use outer computed for indicators; new ones show basic card until full update.
         fresh_companies, landing_f, _env_f, _store_f, _ = get_inputs()
         hist_f = make_historical_store()
@@ -304,7 +302,7 @@ def main() -> None:
             _render_add_company_form(suggest, current_tickers)
 
         # Re-fetch companies (lightweight) so the cards section always sees the
-        # latest persisted list (add/remove now also does full rerun for graph etc.).
+        # latest persisted list from DB.
         fresh_companies, landing_f, _env_f, _store_f, _ = get_inputs()
         hist_f = make_historical_store()
         current_tickers = {(c.ticker or "").upper() for c in fresh_companies if c.ticker}
