@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import sys
 import threading
 import time
@@ -298,6 +299,137 @@ def _start_company_mutation(ticker: str, *, is_remove: bool) -> None:
     threading.Thread(target=_worker, daemon=True).start()
 
 
+def _call_opencode_zen(
+    api_key: str, model: str, base_url: str, messages: list[dict[str, str]]
+) -> str:
+    """Call OpenCode Zen OpenAI-compatible /chat/completions. Returns content text."""
+    import httpx
+
+    url = f"{base_url.rstrip('/')}/chat/completions"
+    payload: dict[str, Any] = {
+        "model": model,
+        "temperature": 0.1,
+        "max_tokens": 220,
+        "messages": messages,
+    }
+    resp = httpx.post(
+        url,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=30.0,
+    )
+    if resp.status_code >= 400:
+        msg = f"opencode zen http {resp.status_code}: {resp.text[:200]}"
+        raise RuntimeError(msg)
+    data = resp.json()
+    return ((data.get("choices") or [{}])[0].get("message", {}).get("content") or "").strip()
+
+
+def _early_warning_agent(user_message: str) -> str:
+    """Early Warning Trigger Export agent.
+
+    Returns compact, minimal insights. No boilerplate.
+    Uses current portfolio snapshot (stats + per-company indicators + correlations).
+    If OPENCODE_API_KEY is set, calls OpenCode Zen (OpenAI-compatible chat
+    completions); otherwise falls back to deterministic synthesis.
+    """
+    stats = st.session_state.get("latest_stats")
+    computed = st.session_state.get("latest_computed", [])
+
+    if not stats or not computed:
+        return "No live portfolio snapshot available yet."
+
+    # Build minimal live context (real data only)
+    context_lines = [
+        f"Portfolio: {stats.n_companies} cos | mean risk {stats.mean_risk:.0f} | {stats.n_bad} bad",
+    ]
+    if stats.indicator_contributions:
+        drivers = ", ".join(
+            f"{name} ({val:.1f})" for _, val, name in stats.indicator_contributions[:4]
+        )
+        context_lines.append(f"Top weighted drivers: {drivers}")
+
+    if stats.correlated_pairs:
+        pairs = ", ".join(f"{a}↔{b} ({c:.2f})" for a, b, c in stats.correlated_pairs[:3])
+        context_lines.append(f"High-risk correlations: {pairs}")
+
+    # Sample bad high-weight signals
+    bad_high_w = []
+    for co, results, _, _ in computed:
+        for p, r in results:
+            if r.status == "bad" and getattr(p, "weight", 0) >= 0.08:
+                bad_high_w.append(
+                    f"{co.ticker or co.name} {p.label}={r.score} (w={getattr(p, 'weight', 0):.2f})"
+                )
+                break  # one per company
+    if bad_high_w:
+        context_lines.append("Key bad high-weight: " + " | ".join(bad_high_w[:3]))
+
+    context = "\n".join(context_lines)
+
+    # Try real LLM via OpenCode Zen (Anomaly gateway) if key present
+    api_key = os.getenv("OPENCODE_API_KEY")
+    if api_key:
+        try:
+            base_url = os.getenv("OPENCODE_BASE_URL", "https://opencode.ai/zen/v1")
+            model = os.getenv("OPENCODE_LLM_MODEL", "minimax-m3")
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an Early Warning Trigger Export agent for credit "
+                        "portfolio risk. Given a live real-data snapshot, reply with "
+                        "1-3 ultra-short insights. Use factor models, contagion, tail "
+                        "clustering. No disclaimers. Direct and compact. One sentence "
+                        "max per point."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Current portfolio snapshot:\n{context}\n\n"
+                        f"User question: {user_message}\n\n"
+                        "Return only the compact insights."
+                    ),
+                },
+            ]
+            text = _call_opencode_zen(api_key, model, base_url, messages)
+            if text:
+                lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+                return " ".join(lines[:3]) if lines else text[:280]
+        except Exception as exc:
+            logger.info("OpenCode Zen call failed, falling back to deterministic: %s", exc)
+
+    # Deterministic fallback (no key or LLM error)
+    query = user_message.lower().strip()
+
+    insights = []
+
+    if stats.mean_risk >= 55:
+        insights.append(f"Mean risk {stats.mean_risk:.0f} — monitor factor exposures.")
+
+    if stats.indicator_contributions:
+        top = stats.indicator_contributions[0]
+        insights.append(
+            f"Dominant driver: {top[2]} (contrib {top[1]:.1f}). Key EWI per factor models."
+        )
+
+    if stats.correlated_pairs:
+        insights.append("Correlation clusters active — contagion risk (network models).")
+
+    if "bad" in query or "high weight" in query:
+        # already surfaced via context
+        pass
+
+    if not insights:
+        insights.append("No acute EWI triggers in current snapshot.")
+
+    return " ".join(insights[:3])
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -369,6 +501,10 @@ def main() -> None:
         _ensure_data_for_new_companies(companies, hist)
         stats = portfolio_stats(computed)
 
+        # Store latest snapshot for AI agent chat
+        st.session_state["latest_stats"] = stats
+        st.session_state["latest_computed"] = computed
+
         # Compute correlated high-risk pairs for the overview widget.
         # Uses the same graph logic (yfinance returns when available).
         try:
@@ -408,7 +544,7 @@ def main() -> None:
         except Exception:  # noqa: S110 - non-fatal for widget
             pass
 
-        render_portfolio_overview(stats)
+        render_portfolio_overview(stats, computed=computed)
         try:
             if computed:
                 with st.expander("Correlation graph", expanded=True):
@@ -656,6 +792,35 @@ def main() -> None:
             st.toast(msg, icon=icon)
 
     _companies_section(suggest)
+
+    # ---------------------------------------------------------------------------
+    # Early Warning Trigger Agent Chat (bottom of app)
+    # ---------------------------------------------------------------------------
+    st.divider()
+
+    st.markdown("### 🤖 Early Warning Trigger Agent")
+    st.caption("Compact EWI insights (portfolio + indicators + corr). SOTA lens.")
+
+    # Chat history
+    if "ew_messages" not in st.session_state:
+        st.session_state.ew_messages = []
+
+    # Display chat history
+    for message in st.session_state.ew_messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # Chat input pinned at bottom (idiomatic Streamlit)
+    if prompt := st.bottom.chat_input("Ask about early warning triggers..."):
+        # Add user message
+        st.session_state.ew_messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        response = _early_warning_agent(prompt)
+        st.session_state.ew_messages.append({"role": "assistant", "content": response})
+        with st.chat_message("assistant"):
+            st.markdown(response)
 
 
 def _render_company_cards(

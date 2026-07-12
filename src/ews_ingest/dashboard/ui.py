@@ -60,7 +60,7 @@ try:
 except ImportError:
     _YFILES_AVAILABLE = False
 
-from typing import cast
+from typing import Any, cast
 
 __all__ = [
     "inject_theme",
@@ -413,7 +413,7 @@ details.pb-row > summary:hover{ background:var(--line-soft); border-radius:6px; 
   fill: currentColor !important;
 }
 .pb-row-label{ font-size:15px; font-weight:600; color:var(--ink-900); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.pb-weight{ font-size:12px; font-weight:600; color:var(--ink-700); margin-left:6px; font-family:"JetBrains Mono",ui-monospace,monospace; }
+.pb-weight{ font-size:12px; font-weight:600; color:var(--ink-500); margin-left:6px; font-family:"JetBrains Mono",ui-monospace,monospace; }
 .pb-row-val{ font-size:14px; font-weight:600; color:var(--ink-900); font-family:"JetBrains Mono",ui-monospace,monospace; }
 .pb-row-badge{
   display:inline-flex; align-items:center; gap:3px; border-radius:var(--radius-pill);
@@ -804,6 +804,43 @@ def _distribution_html(stats: PortfolioStats) -> str:
     )
 
 
+def _multi_flag_html(computed: list[Any] | None) -> str:
+    """Shows companies with multiple high-weight bad indicators.
+
+    This is a strong, always-actionable EWS signal and is never empty/useless
+    like sector data when sectors are missing.
+    """
+    if not computed:
+        return '<div style="color:var(--ink-500);font-size:13px;">n/a</div>'
+
+    flagged: list[tuple[str, float, int, str]] = []
+    for co, res, comp, _ in computed:
+        bad_high = [
+            (p.label, r.score)
+            for p, r in res
+            if r.status == "bad" and getattr(p, "weight", 0) >= 0.07
+        ]
+        if len(bad_high) >= 2:
+            flag_str = ", ".join(f"{label} ({s:.0f})" for label, s in bad_high[:2])
+            flagged.append((co.name, comp, len(bad_high), flag_str))
+
+    if not flagged:
+        return '<div style="color:var(--ink-500);font-size:13px;">No companies with multiple high-weight bad flags.</div>'
+
+    flagged.sort(key=lambda x: -x[1])
+    rows: list[str] = []
+    for name, score, count, flags in flagged[:5]:
+        rows.append(
+            '<div class="pb-sec-row">'
+            f'<span class="pb-sec-name">{_esc(name)}</span>'
+            f'<span class="pb-sec-meta">{count} flags</span>'
+            f'<span class="pb-sec-bar"><span class="pb-sec-bar-fill" style="width:{min(score, 100):.0f}%;background:#DB0011"></span></span>'
+            f"</div>"
+            f'<div style="font-size:11px;color:var(--ink-500);margin-left:8px;margin-bottom:6px;">{flags}</div>'
+        )
+    return "<div>" + "".join(rows) + "</div>"
+
+
 def _drivers_html(stats: PortfolioStats) -> str:
     """HTML for top weighted risk drivers (indicator contrib = avg(score * weight))."""
     items = stats.indicator_contributions[:5]
@@ -953,7 +990,7 @@ def _risk_exposure_html(stats: PortfolioStats) -> str:
 # ---------------------------------------------------------------------------
 
 
-def render_portfolio_overview(stats: PortfolioStats) -> None:
+def render_portfolio_overview(stats: PortfolioStats, *, computed: list[Any] | None = None) -> None:
     """Centered symmetric overview using real computed data (no hardcoded/demo values
     for the top widgets themselves — values come from weighted per-company composites
     and indicator results).
@@ -961,8 +998,7 @@ def render_portfolio_overview(stats: PortfolioStats) -> None:
     Widgets:
     - 4 KPIs (mean risk, HHI, country conc, data coverage)
     - Weighted risk drivers (top indicators by avg score x weight)
-    - Sector risk bars
-    - Risk distribution + sector exposure
+    - Risk distribution + multi-red-flag companies
     - Top risk borrowers + exposure card
     - Correlated risk (high-risk pairs with strong return co-movement)
     - Stat chips (sanctions, sentiment, worst indicator)
@@ -1043,13 +1079,14 @@ def render_portfolio_overview(stats: PortfolioStats) -> None:
         )
         st.write("")
 
-    # -- Risk breakdown + sector exposure, side by side --
-    sec_rows = "".join(_sector_html(s) for s in stats.sectors) or (
-        '<div style="color:var(--ink-500);font-size:13px;">n/a</div>'
-    )
+    # -- Risk breakdown + multi-red-flag companies (replaced sector exposure) --
     breakdown_cols = st.columns([1, 1], gap="medium")
     with breakdown_cols[0]:
-        dist_html = _distribution_html(stats) if stats.n_companies > 0 else '<div style="color:var(--ink-500);font-size:13px;">n/a (no real data)</div>'
+        dist_html = (
+            _distribution_html(stats)
+            if stats.n_companies > 0
+            else '<div style="color:var(--ink-500);font-size:13px;">n/a (no real data)</div>'
+        )
         st.markdown(
             f"""
             <div class="pb-card">
@@ -1060,11 +1097,12 @@ def render_portfolio_overview(stats: PortfolioStats) -> None:
             unsafe_allow_html=True,
         )
     with breakdown_cols[1]:
+        multi_html = _multi_flag_html(computed)
         st.markdown(
             f"""
             <div class="pb-card">
-              <div class="pb-card-title">Sector exposure</div>
-              {sec_rows}
+              <div class="pb-card-title">Multi-red-flag companies</div>
+              {multi_html}
             </div>
             """,
             unsafe_allow_html=True,
