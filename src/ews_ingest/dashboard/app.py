@@ -135,36 +135,14 @@ def _render_correlation_graph(computed: list[CompanyResult]) -> None:
 # ---------------------------------------------------------------------------
 
 
-# Per-entity source IDs that are needed for the dashboard's per-company
-# signals (everything else is global/macro). If a company has zero landing
-# records from any of these, its signals will all be demo.
-_PER_ENTITY_SOURCE_IDS = (
-    "news.hackernews",
-    "news.gdelt",
-    "credit_market.sec_form4_13f",
-    "credit_market.yahoo",
-    "company_financials.submissions",
-    "company_financials.company_facts",
-    "sanctions.opensanctions",
-    "identity.wikidata",
-    "universe.sec_sic_codes",
-    "labor.state_warn_ny",
-)
+def _ensure_data_for_new_companies(companies: list[Company], hist: HistoricalStore) -> None:
+    """Kick off a background fetch for any company that has no DB records yet.
 
-
-def _ensure_data_for_new_companies(companies: list[Company], landing: LandingReader) -> None:
-    """Kick off a background fetch for any company that has no landing data.
-
-    If a user adds a company to the store (via the UI, by editing the JSON
-    file, or by some other path) without the per-entity sources being re-run,
-    every per-company signal on that card falls back to "demo". This helper
-    detects those companies and triggers a non-blocking refresh, so the next
-    render shows real numbers.
-
-    We mark the ticker in ``st.session_state["pending_refreshes"]`` so the
-    existing "background refresh running" caption picks it up, and the
-    existing fingerprint cache key includes ``last_update`` so the next
-    render recomputes once the data lands.
+    If a user adds a company (via UI or by editing companies.json) without
+    running its per-entity sources, signals fall back to demo values. This
+    detects tickers missing from the historical store and fires a non-blocking
+    refresh. The pending state + fingerprint cache ensure the next render
+    picks up real data when it lands.
     """
     pending = st.session_state.setdefault("pending_refreshes", {})
     newly_fetched: list[str] = []
@@ -172,19 +150,9 @@ def _ensure_data_for_new_companies(companies: list[Company], landing: LandingRea
         tkr = (company.identifiers.ticker or "").upper()
         if not tkr or tkr in pending:
             continue
-        # Cheap check: does this ticker have *any* per-entity record landed?
-        has_data = False
-        for sid in _PER_ENTITY_SOURCE_IDS:
-            try:
-                if landing.read(sid).records:
-                    has_data = True
-                    break
-            except Exception as exc:
-                logging.getLogger(__name__).debug("landing.read(%s) failed: %s", sid, exc)
-                continue
-        if has_data:
+        if hist.get_last_update(tkr):
             continue
-        # No data for this company — kick off a background refresh.
+        # No data for this ticker in the DB yet — trigger background fetch.
         try:
             trigger_refresh(tkr, blocking=False)
         except Exception as exc:
@@ -255,11 +223,10 @@ def main() -> None:
     computed: list[CompanyResult] = _compute(fp)
 
     # --- Auto-fetch for companies added without data ---
-    # If a company was added to the store (manually or via the UI) but the
-    # per-entity sources were never re-run, its landing zone is empty and
-    # every signal falls back to "demo". Detect those companies and kick
-    # off a background refresh so the next render shows real numbers.
-    _ensure_data_for_new_companies(companies, landing)
+    # If a company was added without its per-entity sources ever being run,
+    # hist has no records for it and all its signals will be demo. Detect
+    # and trigger a background refresh.
+    _ensure_data_for_new_companies(companies, hist)
 
     pending = st.session_state.setdefault("pending_refreshes", {})
     if pending:

@@ -90,7 +90,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=demo.country(),
             score=100.0 - demo.country_confidence(),
             source_ids=(source_id,),
-            note="No country seeded or Wikidata records landed — showing demo.",
+            note="No country seeded or Wikidata records landed — no data found.",
         )
     countries = set()
     for rec in records:
@@ -105,7 +105,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=demo.country(),
             score=100.0 - demo.country_confidence(),
             source_ids=(source_id,),
-            note="No country signal found in landed records — showing demo.",
+            note="No country signal found in landed records — no data found.",
         )
     primary = next(iter(countries))
     confidence = max(0.0, min(100.0, round(100.0 - (len(countries) - 1) * 25.0, 1)))

@@ -97,7 +97,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             score=50.0 - demo.sentiment() * 3.0,
             missing_env=tuple(miss),
             source_ids=(source_id,),
-            note="API key(s) not configured — showing demo sentiment.",
+            note="API key(s) not configured — no data found.",
         )
 
     compounds: list[float] = []
@@ -115,7 +115,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=rf"{demo.sentiment():+.2f}",
             score=50.0 - demo.sentiment() * 3.0,
             source_ids=(source_id,),
-            note="No news stories landed for this company — showing demo.",
+            note="No news stories landed for this company — no data found.",
         )
 
     mean = sum(compounds) / len(compounds)

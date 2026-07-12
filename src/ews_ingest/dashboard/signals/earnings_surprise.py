@@ -150,7 +150,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             score=50.0,
             missing_env=tuple(miss),
             source_ids=(source_id,),
-            note="API key not configured — showing demo SUE.",
+            note="API key not configured — no data found.",
         )
     records = ctx.landing.read(source_id).records
     facts = _facts_for_company(records, company)
@@ -160,7 +160,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value="n/a",
             score=50.0,
             source_ids=(source_id,),
-            note="No XBRL facts for this borrower — showing demo SUE.",
+            note="No XBRL facts for this borrower — no data found.",
         )
     quarters = _extract_quarterly_ni(facts)
     if len(quarters) < _TRAILING_QUARTERS + 1:
@@ -171,7 +171,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             source_ids=(source_id,),
             note=(
                 f"Need {_TRAILING_QUARTERS + 1}+ quarters of NI in XBRL; "
-                f"have {len(quarters)} — showing demo SUE."
+                f"have {len(quarters)} — no data found."
             ),
         )
     last_end, last_ni = quarters[-1]

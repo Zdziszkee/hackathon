@@ -90,7 +90,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             score=demo.volatility() / 60.0 * 100.0,
             missing_env=tuple(missing),
             source_ids=(source_id,),
-            note="API key not configured — showing demo volatility.",
+            note="API key not configured — no data found.",
         )
     records = ctx.landing.read(source_id).records
     if not records:
@@ -99,7 +99,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=rf"{demo.volatility()}%",
             score=demo.volatility() / 60.0 * 100.0,
             source_ids=(source_id,),
-            note="No OHLCV records landed — showing demo volatility.",
+            note="No OHLCV records landed — no data found.",
         )
     closes: list[float] = []
     for rec in records:
@@ -118,7 +118,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=rf"{demo.volatility()}%",
             score=demo.volatility() / 60.0 * 100.0,
             source_ids=(source_id,),
-            note="Not enough price points landed — showing demo volatility.",
+            note="Not enough price points landed — no data found.",
         )
     score = min(100.0, max(0.0, (vol - 10.0) / 50.0 * 100.0))
     status = "good" if vol < 25 else "warning" if vol < 40 else "bad"

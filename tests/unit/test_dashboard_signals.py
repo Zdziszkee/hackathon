@@ -223,7 +223,7 @@ def test_macro_health_demo_when_empty(tmp_path: Path) -> None:
     result = macro_compute(UPS, ctx)
     assert result.status == "demo"
     assert isinstance(result.note, str)
-    assert "demo" in result.note.lower()
+    assert "no data" in result.note.lower()
 
 
 def test_macro_health_unavailable_when_unbound(tmp_path: Path) -> None:

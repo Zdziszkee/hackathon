@@ -121,7 +121,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=f"GSCPI {demo.gscpi():+.2f}",
             score=50.0 + demo.gscpi() * 20.0,
             source_ids=(),
-            note="No supply-chain source bound — showing demo.",
+            note="No supply-chain source bound — no data found.",
         )
 
     gscpi_sid = ctx.source_for("supply_chain.pressure")
@@ -171,14 +171,14 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
                 score=50.0 + demo.gscpi() * 20.0,
                 missing_env=tuple(missing_env),
                 source_ids=source_ids,
-                note="API key(s) missing and no GSCPI data landed — showing demo.",
+                note="API key(s) missing and no GSCPI data landed — no data found.",
             )
         return demo_result(
             label_hint="supply_chain",
             value=f"GSCPI {demo.gscpi():+.2f}",
             score=50.0 + demo.gscpi() * 20.0,
             source_ids=source_ids,
-            note="No GSCPI data landed — showing demo.",
+            note="No GSCPI data landed — no data found.",
         )
 
     pieces: list[float] = []

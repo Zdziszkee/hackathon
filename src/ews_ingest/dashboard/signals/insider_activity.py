@@ -165,7 +165,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             score=50.0,
             missing_env=tuple(miss),
             source_ids=(source_id,),
-            note="API key not configured — showing demo count.",
+            note="API key not configured — no data found.",
         )
     records = ctx.landing.read(source_id).records
     insider, institutional = _count_for_company(records, company)
@@ -176,7 +176,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value="0 filings",
             score=50.0,
             source_ids=(source_id,),
-            note=f"No Form 4 / 13F filings for this borrower in the last {_TRAILING_DAYS} days — showing demo.",
+            note=f"No Form 4 / 13F filings for this borrower in the last {_TRAILING_DAYS} days — no data found.",
         )
     # Unusual activity heuristic: any insider Form 4 in the window is
     # noteworthy. Score scales with count (capped).

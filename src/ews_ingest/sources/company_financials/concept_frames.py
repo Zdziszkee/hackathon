@@ -74,14 +74,27 @@ class SecConceptFrames:
                     ),
                 )
         for tax, tag, frame in CROSS_FRAMES:
-            raw = sec.frames(ctx.http, ctx.rate_policy, tax, tag, frame)
-            yield build_record(
-                ctx,
-                self.source_id,
-                self.source_type,
-                RecordInput(
-                    payload=raw,
-                    raw_format=RawFormat.JSON,
-                    url=f"https://data.sec.gov/api/xbrl/frames/{tax}/{tag}/{frame}.json",
-                ),
-            )
+            try:
+                raw = sec.frames(ctx.http, ctx.rate_policy, tax, tag, frame)
+                yield build_record(
+                    ctx,
+                    self.source_id,
+                    self.source_type,
+                    RecordInput(
+                        payload=raw,
+                        raw_format=RawFormat.JSON,
+                        url=f"https://data.sec.gov/api/xbrl/frames/{tax}/{tag}/{frame}.json",
+                    ),
+                )
+            except httpx.HTTPStatusError as exc:
+                _logger.debug(
+                    "frames %s/%s/%s failed: %s",
+                    tax,
+                    tag,
+                    frame,
+                    exc.response.status_code,
+                )
+                continue
+            except Exception as exc:
+                _logger.warning("frames %s/%s/%s error: %s", tax, tag, frame, exc)
+                continue

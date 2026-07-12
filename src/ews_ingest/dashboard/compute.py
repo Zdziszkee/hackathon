@@ -22,8 +22,9 @@ __all__ = [
     "portfolio_stats",
 ]
 
-# Scores that count toward the composite. `demo` is a deterministic estimate
-# (worth counting when no real data has landed); only `unavailable` is excluded.
+# Scores that count toward the composite. `demo` (shown as "no data found")
+# is a deterministic estimate (worth counting when no real data has landed);
+# only `unavailable` is excluded.
 ScoredStatus = str  # "good" | "warning" | "bad" | "demo"
 _SCORED_STATUSES: frozenset[ScoredStatus] = frozenset({"good", "warning", "bad", "demo"})
 
@@ -259,7 +260,7 @@ def _mean_sentiment(rows: list[CompanyResult]) -> float | None:
 
 
 def _data_coverage(rows: list[CompanyResult]) -> float:
-    """Percentage of tiles backed by landed (non-demo) data."""
+    """Percentage of tiles backed by landed (non-demo/"no data found") data."""
     total_real = sum(1 for _co, res, _s, _f in rows for _p, r in res if r.status in _REAL_STATUSES)
     total_tiles = sum(len(res) for _co, res, _s, _f in rows) or 1
     return total_real / total_tiles * 100

@@ -65,7 +65,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=demo.industry(),
             score=demo.industry_confidence(),
             source_ids=(),
-            note="No industry sources bound — showing demo.",
+            note="No industry sources bound — no data found.",
         )
 
     sic_map_sid = ctx.source_for("industry.sic")
@@ -112,7 +112,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=demo.industry(),
             score=100.0 - demo.industry_confidence(),
             source_ids=source_ids,
-            note="No SEC submissions landed and no seeded sector — showing demo industry.",
+            note="No SEC submissions landed and no seeded sector — no data found.",
         )
 
     primary_sic = sic_codes[0] if sic_codes else ""

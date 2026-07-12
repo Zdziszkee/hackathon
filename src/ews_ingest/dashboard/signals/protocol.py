@@ -79,9 +79,9 @@ class SignalProvider(Protocol):
 
     Implementations read landed records (via ``ctx.landing``) for the source(s)
     bound to their declared ``roles``. They must degrade gracefully: missing
-    binding -> ``unavailable``; landed data absent -> ``demo`` with a
-    deterministic fallback; missing API key -> ``demo`` with ``missing_env``
-    populated.
+    binding -> ``unavailable``; landed data absent -> ``demo`` (shown as
+    "no data found") with a deterministic fallback; missing API key ->
+    ``demo`` with ``missing_env`` populated.
     """
 
     indicator_id: str

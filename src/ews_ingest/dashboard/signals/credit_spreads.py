@@ -88,7 +88,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             score=50.0 + demo.gscpi() * 20.0,
             missing_env=tuple(miss),
             source_ids=(source_id,),
-            note="API key not configured — showing demo spread.",
+            note="API key not configured — no data found.",
         )
     records = ctx.landing.read(source_id).records
     points = _read_series_points(records, _HY_OAS)
@@ -101,7 +101,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=f"HY {demo.gscpi():+.2f}",
             score=50.0 + demo.gscpi() * 20.0,
             source_ids=(source_id,),
-            note="Not enough HY OAS points landed — showing demo spread.",
+            note="Not enough HY OAS points landed — no data found.",
         )
     risk = max(0.0, min(100.0, 50.0 + z * 25.0))
     status = "good" if risk < 40 else "warning" if risk < 70 else "bad"

@@ -13,6 +13,7 @@ On mutating actions (Add / Remove) the cache is invalidated via
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from collections.abc import Callable
@@ -126,15 +127,16 @@ def trigger_refresh(ticker: str | None = None, *, blocking: bool = False) -> Non
     """
 
     def _run() -> None:  # noqa: C901, PLR0912
-        try:
-            services = make_services_from_env()
-            hist = make_historical_store()
-            if ticker:
-                # only the sources that actually attach to a company
-                source_ids = pick_sources(scopes={Scope.PER_ENTITY, Scope.FACILITY})
-            else:
-                source_ids = list(all_source_ids())
-            for sid in source_ids:
+        services = make_services_from_env()
+        hist = make_historical_store()
+        logger = logging.getLogger(__name__)
+        if ticker:
+            # only the sources that actually attach to a company
+            source_ids = pick_sources(scopes={Scope.PER_ENTITY, Scope.FACILITY})
+        else:
+            source_ids = list(all_source_ids())
+        for sid in source_ids:
+            try:
                 cfg = services.sources.get(sid)
                 if not cfg or not cfg.enabled:
                     continue
@@ -183,8 +185,14 @@ def trigger_refresh(ticker: str | None = None, *, blocking: bool = False) -> Non
                                 }
                             ],
                         )
-        except Exception:  # noqa: S110
-            pass  # TODO: log failure
+            except Exception as exc:
+                logger.warning(
+                    "per-entity refresh for %s failed on %s: %s",
+                    ticker or "global",
+                    sid,
+                    exc,
+                )
+                continue
 
     if blocking:
         _run()

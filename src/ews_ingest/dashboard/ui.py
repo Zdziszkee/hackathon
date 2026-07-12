@@ -566,10 +566,11 @@ def _display_sector(sector: str) -> str:
 
 def _status_badge(status: str) -> str:
     tok = _token(status)
+    label = "no data found" if status == "demo" else status
     return (
         f'<span class="pb-row-badge" '
         f'style="background:{tok["bg"]};color:{tok["fg"]};border:1px solid {tok["bd"]}">'
-        f"{_esc(status)}</span>"
+        f"{_esc(label)}</span>"
     )
 
 
@@ -1118,11 +1119,6 @@ def _row_html(
     status_ic = status_ic.replace("currentColor", fg)
 
     badges = _status_badge(result.status)
-    if result.status == "demo":
-        badges += (
-            '<span class="pb-row-badge" '
-            'style="background:rgba(159,161,164,.08);color:#9FA1A4;border:1px solid rgba(159,161,164,.18);">demo</span>'
-        )
     if result.missing_env:
         badges += (
             '<span class="pb-row-badge" '

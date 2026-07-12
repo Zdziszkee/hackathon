@@ -93,7 +93,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             score=50.0,
             missing_env=tuple(miss),
             source_ids=(source_id,),
-            note="API key not configured — showing demo WARN count.",
+            note="API key not configured — no data found.",
         )
     records = ctx.landing.read(source_id).records
     today = _dt.datetime.now(UTC).date()
@@ -104,7 +104,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value="0 notices",
             score=50.0,
             source_ids=(source_id,),
-            note=f"No WARN notices landed in the last {_TRAILING_DAYS} days — showing demo.",
+            note=f"No WARN notices landed in the last {_TRAILING_DAYS} days — no data found.",
         )
     # Score: more notices = more labor-market stress. Same for every company.
     score = min(100.0, 50.0 + min(n, 20) * 2.5)

@@ -35,9 +35,13 @@ class FinraTrace:
             if not entity.ticker:
                 continue
             url = BASE
-            raw = ctx.http.get_json(url, policy=ctx.rate_policy, headers=headers)
-            for spec in parse(raw):
-                spec.entities = [entity]
-                spec.url = url
-                spec.extra = {"ticker": entity.ticker, "note": "verify_endpoint"}
-                yield build_record(ctx, self.source_id, self.source_type, spec)
+            try:
+                raw = ctx.http.get_json(url, policy=ctx.rate_policy, headers=headers)
+                for spec in parse(raw):
+                    spec.entities = [entity]
+                    spec.url = url
+                    spec.extra = {"ticker": entity.ticker, "note": "verify_endpoint"}
+                    yield build_record(ctx, self.source_id, self.source_type, spec)
+            except Exception as exc:
+                ctx.logger.warning("finra_trace failed for %s: %s", entity.ticker, exc)
+                continue

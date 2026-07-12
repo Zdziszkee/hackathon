@@ -53,7 +53,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=f"{demo.sanctions_count()} flags",
             score=demo.sanctions_count() * 30.0,
             source_ids=(source_id,),
-            note="No sanctions records landed — showing demo.",
+            note="No sanctions records landed — no data found.",
         )
     matches = 0
     for rec in records:

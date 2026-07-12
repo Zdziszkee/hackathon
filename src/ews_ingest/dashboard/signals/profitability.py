@@ -110,7 +110,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             score=max(0.0, 60.0 - demo.net_margin() * 2.0),
             missing_env=tuple(missing),
             source_ids=(source_id,),
-            note="Required env var(s) not set — showing demo margin.",
+            note="Required env var(s) not set — no data found.",
         )
     records = ctx.landing.read(source_id).records
     if not records:
@@ -119,7 +119,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=rf"{demo.net_margin():+.1f}%",
             score=max(0.0, 60.0 - demo.net_margin() * 2.0),
             source_ids=(source_id,),
-            note="No SEC company-facts records landed — showing demo margin.",
+            note="No SEC company-facts records landed — no data found.",
         )
     facts_for_company: dict[str, object] | None = None
     for rec in records:
@@ -132,7 +132,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=rf"{demo.net_margin():+.1f}%",
             score=max(0.0, 60.0 - demo.net_margin() * 2.0),
             source_ids=(source_id,),
-            note="No company-facts for this borrower — showing demo margin.",
+            note="No company-facts for this borrower — no data found.",
         )
     concepts = _us_gaap_concepts(facts_for_company)
     if not concepts:
@@ -141,7 +141,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=rf"{demo.net_margin():+.1f}%",
             score=max(0.0, 60.0 - demo.net_margin() * 2.0),
             source_ids=(source_id,),
-            note="No us-gaap facts found in landed record — showing demo margin.",
+            note="No us-gaap facts found in landed record — no data found.",
         )
     revenues, rev_end = _concept_value(concepts, _REVENUE_TAGS)
     net, net_end = _concept_value(concepts, _NET_INCOME_TAGS)
@@ -151,7 +151,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=rf"{demo.net_margin():+.1f}%",
             score=max(0.0, 60.0 - demo.net_margin() * 2.0),
             source_ids=(source_id,),
-            note="Revenue + net-income tags not found in XBRL — showing demo margin.",
+            note="Revenue + net-income tags not found in XBRL — no data found.",
         )
     if revenues is None and net is not None:
         # Pre-revenue / SPAC-style filer: revenue tag absent but net income
@@ -178,7 +178,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=rf"{demo.net_margin():+.1f}%",
             score=max(0.0, 60.0 - demo.net_margin() * 2.0),
             source_ids=(source_id,),
-            note="NetIncome tags not found in XBRL — showing demo margin.",
+            note="NetIncome tags not found in XBRL — no data found.",
         )
     if net is None:
         return demo_result(
@@ -186,7 +186,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=rf"{demo.net_margin():+.1f}%",
             score=max(0.0, 60.0 - demo.net_margin() * 2.0),
             source_ids=(source_id,),
-            note="NetIncome tags not found in XBRL — showing demo margin.",
+            note="NetIncome tags not found in XBRL — no data found.",
         )
     margin = (net or 0) / (revenues or 1) * 100.0
     score = max(0.0, min(100.0, 50.0 - margin * 2.0))

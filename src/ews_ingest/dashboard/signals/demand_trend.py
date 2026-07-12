@@ -94,7 +94,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=f"{demo.demand_trend():+.2f}",
             score=50.0,
             source_ids=(),
-            note="No source bound — showing demo.",
+            note="No source bound — no data found.",
         )
 
     missing_env: list[str] = []
@@ -123,7 +123,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             score=50.0 + demo.demand_trend() * 5.0,
             missing_env=tuple(missing_env),
             source_ids=(source_id,),
-            note="API key(s) not configured — showing demo demand trend.",
+            note="API key(s) not configured — no data found.",
         )
     if len(points) < 4:
         return demo_result(
@@ -131,7 +131,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=rf"{demo.demand_trend():+.2f}",
             score=50.0 + demo.demand_trend() * 5.0,
             source_ids=(source_id,),
-            note="Not enough demand data points landed — showing demo trend.",
+            note="Not enough demand data points landed — no data found.",
         )
 
     slope = _slope(points)
@@ -141,7 +141,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=rf"{demo.demand_trend():+.2f}",
             score=50.0 + demo.demand_trend() * 5.0,
             source_ids=(source_id,),
-            note="Could not compute slope — showing demo trend.",
+            note="Could not compute slope — no data found.",
         )
     magnitude = abs(slope)
     # INDPRO is an index around 100 (monthly). A slope of ~1.0/month is

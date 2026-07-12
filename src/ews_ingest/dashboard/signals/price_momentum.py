@@ -135,7 +135,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             score=50.0,
             missing_env=tuple(miss),
             source_ids=(source_id,),
-            note="API key not configured — showing demo momentum.",
+            note="API key not configured — no data found.",
         )
     records = ctx.landing.read(source_id).records
     series = _read_company_closes(records, company)
@@ -145,7 +145,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value="n/a",
             score=50.0,
             source_ids=(source_id,),
-            note="Not enough price points for this borrower — showing demo momentum.",
+            note="Not enough price points for this borrower — no data found.",
         )
     cutoff_date = _dt.datetime.now(UTC).date() - _dt.timedelta(days=_WINDOW_DAYS * 2)
     cutoff = cutoff_date.isoformat()

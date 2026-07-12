@@ -106,7 +106,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=f"{demo.regulation_count()} articles",
             score=min(100.0, demo.regulation_count() * 15.0),
             source_ids=(source_id,),
-            note="No news records landed — showing demo count.",
+            note="No news records landed — no data found.",
         )
     count = 0
     total = 0
@@ -125,7 +125,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=f"{demo.regulation_count()} articles",
             score=min(100.0, demo.regulation_count() * 15.0),
             source_ids=(source_id,),
-            note="No news stories for this company — showing demo count.",
+            note="No news stories for this company — no data found.",
         )
     score = min(100.0, count * 15.0)
     status = "good" if count <= 1 else "warning" if count <= 4 else "bad"

@@ -104,7 +104,7 @@ def compute(company: Identifiers, ctx: SignalContext) -> SignalResult:
             value=f"{demo.pmi():.1f}",
             score=abs(_PMI_LIKE_NEUTRAL - demo.pmi()) * _PMI_LIKE_SCALE,
             source_ids=(source_id,),
-            note="Not enough FRED INDPRO points landed — showing demo PMI.",
+            note="Not enough FRED INDPRO points landed — no data found.",
         )
     pmi_like = _PMI_LIKE_NEUTRAL + z * _PMI_LIKE_SCALE
     pmi_like = max(0.0, min(100.0, pmi_like))

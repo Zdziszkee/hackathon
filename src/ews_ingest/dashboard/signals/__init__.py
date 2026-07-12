@@ -86,7 +86,7 @@ def demo_result(
         value=value,
         score=score,
         status=cast(SignalStatus, "demo"),
-        detail={"demo": True, "label_hint": label_hint},
+        detail={"label_hint": label_hint},
         source_ids=source_ids,
         missing_env=missing_env,
         note=note,
