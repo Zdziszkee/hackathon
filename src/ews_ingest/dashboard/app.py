@@ -360,16 +360,17 @@ def _build_snapshot_context() -> str:
 
 _EARLY_WARNING_SYSTEM_PROMPT = (
     "You are the Early Warning Trigger Export agent for a wholesale credit "
-    "portfolio risk dashboard. You are given:\n"
-    "  1. A live, real-data-only snapshot of the current portfolio (mean risk, "
-    "bad counts, top weighted drivers, high-risk correlations, key bad high-weight "
-    "signals).\n"
-    "  2. The running chat history between you and the user.\n\n"
-    "Your job: reply with 1-3 ultra-short, professional insights per turn. "
-    "Focus on early-warning triggers using factor models, network contagion, tail "
-    "clustering, and leading-indicator logic. For greetings or capability questions, "
-    "reply conversationally in 1-2 sentences. Never use disclaimers, hedging, or "
-    "boilerplate. Be direct and compact. One sentence max per point."
+    "portfolio risk dashboard.\n\n"
+    "LIVE PORTFOLIO SNAPSHOT (real data, refreshed every render — this is the "
+    "ground truth, you DO have access to it, NEVER ask the user to provide it):\n"
+    "<<<SNAPSHOT>>>\n"
+    "{snapshot}\n"
+    "<<<END SNAPSHOT>>>\n\n"
+    "Reply with 1-3 ultra-short, professional insights per turn. Focus on "
+    "early-warning triggers using factor models, network contagion, tail "
+    "clustering, and leading-indicator logic. For greetings or capability "
+    "questions, reply conversationally in 1-2 sentences. Never use disclaimers, "
+    "hedging, or boilerplate. Be direct and compact. One sentence max per point."
 )
 
 
@@ -377,9 +378,9 @@ def _early_warning_agent(history: list[dict[str, str]]) -> str:
     """Early Warning Trigger Export agent.
 
     `history` is the full chat history (list of {role, content}); the latest
-    message must be the user turn. The system prompt + live snapshot are
-    prepended automatically. Uses OpenCode Zen when OPENCODE_API_KEY is set;
-    otherwise falls back to deterministic synthesis.
+    message must be the user turn. The system prompt (with embedded live
+    snapshot) is prepended automatically. Uses OpenCode Zen when
+    OPENCODE_API_KEY is set; otherwise falls back to deterministic synthesis.
     """
     stats = st.session_state.get("latest_stats")
     computed = st.session_state.get("latest_computed", [])
@@ -396,12 +397,9 @@ def _early_warning_agent(history: list[dict[str, str]]) -> str:
         try:
             base_url = os.getenv("OPENCODE_BASE_URL", "https://opencode.ai/zen/v1")
             model = os.getenv("OPENCODE_LLM_MODEL", "minimax-m3")
+            system_prompt = _EARLY_WARNING_SYSTEM_PROMPT.format(snapshot=snapshot_ctx)
             messages: list[dict[str, str]] = [
-                {"role": "system", "content": _EARLY_WARNING_SYSTEM_PROMPT},
-                {
-                    "role": "system",
-                    "content": (f"Current portfolio snapshot (live, real data):\n{snapshot_ctx}"),
-                },
+                {"role": "system", "content": system_prompt},
                 *history,
             ]
             text = _call_opencode_zen(api_key, model, base_url, messages)
@@ -452,8 +450,11 @@ def _early_warning_agent(history: list[dict[str, str]]) -> str:
         )
     if stats.correlated_pairs:
         insights.append("Correlation clusters active — contagion risk (network models).")
-    if ("bad" in query or "high weight" in query) and "Key bad high-weight:" in snapshot_ctx:
-        insights.append("High-weight bad signals already listed above.")
+    if "bad" in query or "high weight" in query:
+        if "Key bad high-weight:" in snapshot_ctx:
+            insights.append("Top bad high-weight signals listed in snapshot.")
+        else:
+            insights.append("No high-weight bad signals in current snapshot.")
     if not insights:
         insights.append("No acute EWI triggers in current snapshot.")
     return " ".join(insights[:3])
