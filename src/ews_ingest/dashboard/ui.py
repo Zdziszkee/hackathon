@@ -1,4 +1,4 @@
-"""Premier Bank dashboard UI — clean, centered, HSBC-inspired.
+"""Premier Bank dashboard UI — clean, centered, bank-inspired.
 
 Rebuilt from scratch: a single centered column, symmetric KPI strip, smooth
 spline chart with red gradient fill, transaction-style risk borrower list,
@@ -12,9 +12,7 @@ Soft diffuse shadows.
 
 from __future__ import annotations
 
-import base64
 from collections.abc import Iterable
-from pathlib import Path
 
 import streamlit as st
 
@@ -154,21 +152,6 @@ _IND_ICON = {
 }
 
 # ---------------------------------------------------------------------------
-# HSBC logo (base64-embedded for inline HTML)
-# ---------------------------------------------------------------------------
-
-_LOGO_PATH = Path(__file__).resolve().parent / "assets" / "hsbc_logo.webp"
-
-
-def _logo_b64() -> str:
-    """Return the HSBC logo as a base64-encoded data URI, or empty string."""
-    if not _LOGO_PATH.exists():
-        return ""
-    data = base64.b64encode(_LOGO_PATH.read_bytes()).decode("ascii")
-    return f"data:image/webp;base64,{data}"
-
-
-# ---------------------------------------------------------------------------
 # Theme CSS
 # ---------------------------------------------------------------------------
 
@@ -273,9 +256,8 @@ details[data-testid="stExpander"] [data-testid="stExpanderDetails"]{ padding:0 2
 
 /* ---- Component classes ---- */
 
-/* Page header — centered, with HSBC logo */
+/* Page header — centered */
 .pb-header{ text-align:center; margin:8px 0 36px; }
-.pb-header img.pb-logo{ height:48px; margin:0 auto 16px; display:block; }
 .pb-header h1{ font-size:28px; font-weight:700; color:var(--ink-900); margin:0 0 6px; letter-spacing:-0.01em; }
 .pb-header p{ font-size:14px; color:var(--ink-500); margin:0; }
 
@@ -464,7 +446,7 @@ details.pb-row[open] > summary .pb-row-toggle .pb-ico-minus{ display:inline-flex
 /* Add-company toolbar */
 .pb-toolbar{ display:flex; gap:10px; margin-bottom:24px; }
 
-/* Compact add/remove widget — not full width, HSBC clean */
+/* Compact add/remove widget — not full width, clean */
 .pb-add-widget {
   width: 340px;
   max-width: 340px;
@@ -709,12 +691,10 @@ def _bar_chart_svg(
 
 
 def render_topbar(n_companies: int, n_sources: int = 0) -> None:
-    """Centered page header: HSBC logo, title + subtitle."""
+    """Centered page header: title + subtitle."""
     _ = (n_companies, n_sources)
-    logo_uri = _logo_b64()
-    logo_html = f'<img class="pb-logo" src="{logo_uri}" alt="HSBC" />' if logo_uri else ""
     st.markdown(
-        f'<div class="pb-header">{logo_html}<h1>Portfolio Risk Dashboard</h1>'
+        '<div class="pb-header"><h1>Portfolio Risk Dashboard</h1>'
         "<p>Cross-region wholesale credit early-warning signals</p></div>",
         unsafe_allow_html=True,
     )

@@ -23,7 +23,7 @@ import os
 import sys
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -59,13 +59,16 @@ logger = logging.getLogger(__name__)
 logging.getLogger("ews_ingest.dashboard").setLevel(logging.INFO)
 logging.getLogger("streamlit").setLevel(logging.WARNING)
 
-# Save our logs to file (data/dashboard.log) + stdout for visibility
-# This follows Streamlit logging docs: use standard logging + config.toml for internals.
+# Save our logs to file (data/dashboard.log) + stderr (terminal) for visibility.
+# We use stderr (not stdout) so the messages always reach the terminal even when
+# Streamlit captures stdout. Also add a high-signal [DASH] prefix so the lines
+# are easy to grep from a running `uv run streamlit run …` terminal.
 _log_dir = Path("data")
 _log_dir.mkdir(parents=True, exist_ok=True)
 _log_file = _log_dir / "dashboard.log"
 
 _dash_log = logging.getLogger("ews_ingest.dashboard")
+_dash_log.setLevel(logging.INFO)
 
 # Add handlers only once (module-level code can run multiple times on reruns/imports)
 if not any(isinstance(h, logging.FileHandler) for h in _dash_log.handlers):
@@ -75,13 +78,31 @@ if not any(isinstance(h, logging.FileHandler) for h in _dash_log.handlers):
     _dash_log.addHandler(_file_handler)
 
 if not any(isinstance(h, logging.StreamHandler) for h in _dash_log.handlers):
-    _console_handler = logging.StreamHandler(sys.stdout)
+    _console_handler = logging.StreamHandler(sys.stderr)
     _console_handler.setLevel(logging.INFO)
-    fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    fmt = "[DASH] %(asctime)s %(levelname)s %(name)s: %(message)s"
     _console_handler.setFormatter(logging.Formatter(fmt))
     _dash_log.addHandler(_console_handler)
 
 _dash_log.propagate = False
+
+# Also re-emit a single line on stdout at import time so the user sees
+# immediately (in the terminal) that the dashboard module loaded and where
+# logs will go.
+print(
+    f"[DASH] {datetime.now(UTC).isoformat(timespec='seconds')} "
+    f"dashboard app loaded — file: {_log_file}",
+    file=sys.stderr,
+)
+
+
+def _dash(msg: str) -> None:
+    """Print a timestamped [DASH] line to stderr. Cheap, always visible."""
+    print(
+        f"[DASH] {datetime.now(UTC).isoformat(timespec='seconds')} {msg}",
+        file=sys.stderr,
+    )
+
 
 # Thread-safe communication from background workers to main script thread.
 # Workers must NEVER touch st.session_state or any st.* (causes "missing ScriptRunContext").
@@ -96,6 +117,13 @@ __all__ = [
 # Back-compat re-export: the test suite imports ``_portfolio_stats`` from
 # this module. The implementation now lives in :mod:`ews_ingest.dashboard.compute`.
 _portfolio_stats = portfolio_stats
+
+# A ticker is considered "stuck" in pending if its background fetch hasn't
+# produced a _refresh_complete marker within this window. This guards against
+# interrupted fetches (e.g. process restart) that would otherwise leave the
+# card in loading state forever. Kept short so a hung fetch self-heals within
+# ~90s instead of staying in the loading state indefinitely.
+_STUCK_PENDING_TIMEOUT = timedelta(seconds=90)
 
 
 # ---------------------------------------------------------------------------
@@ -184,14 +212,42 @@ def _ensure_data_for_new_companies(companies: list[Company], hist: HistoricalSto
     If a user adds a company without running its per-entity sources, signals
     fall back to demo values. This detects tickers missing from the historical
     store and fires a non-blocking refresh.
+
+    Also clears *stuck* pending entries (e.g. left over from a previous process
+    that was killed mid-fetch, or a fetch that hung): if a ticker has been
+    pending for longer than ``_STUCK_PENDING_TIMEOUT`` we drop it so the next
+    render re-triggers the fetch instead of leaving the card in loading limbo.
     """
     pending = st.session_state.setdefault("pending_refreshes", {})
+    now = datetime.now(UTC)
+    stuck_cleared: list[str] = []
+    for tkr in list(pending.keys()):
+        start_str = pending[tkr]
+        start_dt: datetime | None = None
+        if isinstance(start_str, str):
+            try:
+                start_dt = datetime.fromisoformat(start_str)
+            except ValueError:
+                start_dt = None
+        if start_dt is None or (now - start_dt) > _STUCK_PENDING_TIMEOUT:
+            stuck_cleared.append(tkr)
+            pending.pop(tkr, None)
+    if stuck_cleared:
+        st.toast(
+            "Cleared stuck data fetch (will retry): " + ", ".join(stuck_cleared),
+            icon="⚠️",
+        )
+        _dash(f"cleared stuck pending for: {stuck_cleared}")
+
     newly_fetched: list[str] = []
     for company in companies:
         tkr = (company.identifiers.ticker or "").upper()
         if not tkr or tkr in pending:
+            if tkr and tkr in pending:
+                _dash(f"ENSURE_DATA: {tkr} already in pending, skipping kickoff")
             continue
         if hist.get_last_update(tkr):
+            _dash(f"ENSURE_DATA: {tkr} already has data, skipping kickoff")
             continue
         # No data for this ticker in the DB yet — trigger background fetch.
         start = datetime.now(UTC).isoformat()
@@ -199,9 +255,11 @@ def _ensure_data_for_new_companies(companies: list[Company], hist: HistoricalSto
             trigger_refresh(tkr, blocking=False)
         except Exception as exc:
             logging.getLogger(__name__).warning("auto-refresh failed for %s: %s", tkr, exc)
+            _dash(f"auto-refresh failed for {tkr}: {exc}")
             continue
         pending[tkr] = start
         newly_fetched.append(tkr)
+        _dash(f"kicked off background refresh for {tkr} (start={start})")
 
     if newly_fetched:
         st.toast(
@@ -235,17 +293,23 @@ def _process_queued_mutation() -> None:
 
 def _start_company_mutation(ticker: str, *, is_remove: bool) -> None:
     tkr = ticker.strip().upper()
+    action = "REMOVE" if is_remove else "ADD"
+    _dash(f"UI CLICK: {action} button pressed for {tkr}")
     if is_remove:
         logger.info("starting threaded mutation for REMOVE ticker=%s", tkr)
     else:
         logger.info("starting threaded mutation for ADD ticker=%s", tkr)
 
     def _worker() -> None:
-        logger.info("worker thread starting for %s", tkr)
+        _dash(f"WORKER THREAD START: {action} {tkr} (thread id={threading.get_ident()})")
         try:
+            _dash(f"WORKER: getting inputs for {tkr}…")
             _, _, _, store, _ = get_inputs()
+            _dash(f"WORKER: got inputs for {tkr}")
             if is_remove:
+                _dash(f"WORKER: calling store.remove_ticker({tkr})…")
                 removed = store.remove_ticker(tkr)
+                _dash(f"WORKER: remove_ticker returned {removed!r}")
                 bust_inputs_cache()
                 with _mutation_lock:
                     _completed_mutations[tkr] = {
@@ -254,11 +318,19 @@ def _start_company_mutation(ticker: str, *, is_remove: bool) -> None:
                         "success": bool(removed),
                     }
             else:
+                _dash(f"WORKER: calling store.add_ticker({tkr}) (may hit network)…")
                 added = store.add_ticker(tkr)
+                sector = (added.extra_ids or {}).get("sector", "?")
+                _dash(
+                    f"WORKER: add_ticker returned name={added.name!r} "
+                    f"cik={added.cik} sector={sector!r}"
+                )
                 logger.info("add_ticker succeeded for %s, busting cache", tkr)
                 bust_inputs_cache()
                 start = datetime.now(UTC).isoformat()
+                _dash(f"WORKER: calling trigger_refresh({added.ticker}, blocking=False)…")
                 trigger_refresh(added.ticker, blocking=False)
+                _dash(f"WORKER: trigger_refresh dispatched (start={start})")
                 with _mutation_lock:
                     _completed_mutations[tkr] = {
                         "action": "add",
@@ -268,8 +340,10 @@ def _start_company_mutation(ticker: str, *, is_remove: bool) -> None:
                     }
             label = "REMOVE" if is_remove else "ADD"
             logger.info("worker enqueued completion for %s %s", label, tkr)
+            _dash(f"MUTATION COMPLETED: {label} {tkr} success=True")
         except TickerResolutionError as exc:
             logger.info("resolution error for %s: %s", tkr, exc)
+            _dash(f"MUTATION FAILED: {tkr} resolution error: {exc}")
             with _mutation_lock:
                 _completed_mutations[tkr] = {
                     "action": "add" if not is_remove else "remove",
@@ -279,6 +353,7 @@ def _start_company_mutation(ticker: str, *, is_remove: bool) -> None:
                 }
         except Exception as exc:
             logger.exception("mutation worker failed for %s", tkr)
+            _dash(f"MUTATION FAILED: {tkr} {type(exc).__name__}: {exc}")
             with _mutation_lock:
                 _completed_mutations[tkr] = {
                     "action": "add" if not is_remove else "remove",
@@ -292,86 +367,222 @@ def _start_company_mutation(ticker: str, *, is_remove: bool) -> None:
         removing = st.session_state.setdefault("removing_tickers", set())
         removing.add(tkr)
         logger.info("spawned worker thread for REMOVE %s, removing set (main thread)", tkr)
+        _dash(f"MAIN: spawned REMOVE worker thread for {tkr}")
     else:
         resolving = st.session_state.setdefault("resolving_tickers", set())
         resolving.add(tkr)
         logger.info("spawned worker thread for ADD %s, resolving set (main thread)", tkr)
-    threading.Thread(target=_worker, daemon=True).start()
+        _dash(f"MAIN: spawned ADD worker thread for {tkr}")
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+    _dash(f"MAIN: thread started for {tkr} (alive={thread.is_alive()})")
 
 
-def _call_opencode_zen(
-    api_key: str, model: str, base_url: str, messages: list[dict[str, str]]
+def _extract_text_from_response(data: dict[str, Any]) -> str:
+    """Pull assistant text out of an OpenAI-compatible chat response.
+
+    Handles plain content, tool_calls, and the case where the model emits a
+    reasoning-style message with content in an unusual place. Returns "" if
+    no text could be extracted.
+    """
+    choices = data.get("choices") or []
+    if not choices:
+        return ""
+    msg = (choices[0] or {}).get("message") or {}
+    content = (msg.get("content") or "").strip()
+    if content:
+        return content
+    # Fall back to tool_calls text if model chose to call a tool.
+    tool_calls = msg.get("tool_calls") or []
+    parts: list[str] = []
+    for tc in tool_calls:
+        fn = tc.get("function") or {}
+        arg = fn.get("arguments")
+        if isinstance(arg, str) and arg.strip():
+            parts.append(arg.strip())
+    return "\n".join(parts).strip()
+
+
+def _do_opencode_request(
+    url: str, headers: dict[str, str], payload: dict[str, Any], timeout_s: float
 ) -> str:
-    """Call OpenCode Zen OpenAI-compatible /chat/completions. Returns content text."""
+    """Single HTTP call to OpenCode Zen. Returns content text or raises."""
     import httpx
 
-    url = f"{base_url.rstrip('/')}/chat/completions"
-    payload: dict[str, Any] = {
-        "model": model,
-        "temperature": 0.1,
-        "max_tokens": 220,
-        "messages": messages,
-    }
-    resp = httpx.post(
-        url,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json=payload,
-        timeout=30.0,
-    )
+    resp = httpx.post(url, headers=headers, json=payload, timeout=timeout_s)
+    if resp.status_code >= 500:
+        msg = f"opencode zen http {resp.status_code}"
+        raise RuntimeError(msg)
     if resp.status_code >= 400:
         msg = f"opencode zen http {resp.status_code}: {resp.text[:200]}"
         raise RuntimeError(msg)
     data = resp.json()
-    return ((data.get("choices") or [{}])[0].get("message", {}).get("content") or "").strip()
+    text = _extract_text_from_response(data)
+    if not text:
+        # Log full response so the cause (finish_reason, refusal, etc.) is
+        # visible in the dashboard log instead of silently dropping.
+        choices = data.get("choices") or []
+        first = choices[0] if choices else {}
+        logger.warning(
+            "opencode zen returned no text. keys=%s finish_reason=%s first_choice=%s",
+            list(data.keys()),
+            first.get("finish_reason") if isinstance(first, dict) else None,
+            str(first)[:400],
+        )
+    return text
+
+
+def _call_opencode_zen(
+    api_key: str,
+    model: str,
+    base_url: str,
+    messages: list[dict[str, str]],
+    *,
+    timeout_s: float = 60.0,
+    max_retries: int = 2,
+) -> str:
+    """Call OpenCode Zen OpenAI-compatible /chat/completions. Returns content text.
+
+    Retries on empty responses and 5xx / network errors. First call may hit a
+    cold-start on the upstream side, so we give it a generous timeout and a
+    couple of retries.
+    """
+    import time as _t
+
+    url = f"{base_url.rstrip('/')}/chat/completions"
+    payload: dict[str, Any] = {
+        "model": model,
+        "temperature": 0.2,
+        "max_tokens": 10000,
+        "messages": messages,
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    last_exc: Exception | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            text = _do_opencode_request(url, headers, payload, timeout_s)
+            if text:
+                return text
+            last_exc = RuntimeError("empty response from model")
+        except Exception as exc:
+            last_exc = exc
+        if attempt < max_retries:
+            _t.sleep(0.8 * (attempt + 1))
+    msg = f"opencode zen gave up after {max_retries + 1} attempts: {last_exc}"
+    raise RuntimeError(msg)
+
+
+# Cheap fallback model used when the configured model returns empty.
+_FALLBACK_MODEL = "gpt-5.4-nano"
+
+
+def _call_opencode_zen_with_fallback(
+    api_key: str,
+    model: str,
+    base_url: str,
+    messages: list[dict[str, str]],
+) -> str:
+    """Try the configured model, fall back to a cheap one if it returns empty."""
+    try:
+        return _call_opencode_zen(api_key, model, base_url, messages)
+    except RuntimeError as exc:
+        if "empty response" not in str(exc) or model == _FALLBACK_MODEL:
+            raise
+        logger.info("primary model %s returned empty, falling back to %s", model, _FALLBACK_MODEL)
+        return _call_opencode_zen(api_key, _FALLBACK_MODEL, base_url, messages)
 
 
 def _build_snapshot_context() -> str:
-    """Build minimal live context (real data only) from current snapshot."""
+    """Build COMPLETE live context (real data only) from current snapshot.
+
+    Includes every company with every indicator + score + status + weight, plus
+    cross-company correlations. The LLM has full visibility.
+    """
     stats = st.session_state.get("latest_stats")
     computed = st.session_state.get("latest_computed", [])
     if not stats or not computed:
         return ""
-    context_lines = [
-        f"Portfolio: {stats.n_companies} cos | mean risk {stats.mean_risk:.0f} | {stats.n_bad} bad",
+    lines: list[str] = [
+        f"Portfolio: {stats.n_companies} cos | mean risk {stats.mean_risk:.0f}"
+        f" | {stats.n_bad} bad | {stats.n_warning} warn | {stats.n_good} good",
     ]
     if stats.indicator_contributions:
-        drivers = ", ".join(
-            f"{name} ({val:.1f})" for _, val, name in stats.indicator_contributions[:4]
-        )
-        context_lines.append(f"Top weighted drivers: {drivers}")
+        drivers = ", ".join(f"{name} ({val:.1f})" for _, val, name in stats.indicator_contributions)
+        lines.append(f"All indicator contributions (sorted): {drivers}")
     if stats.correlated_pairs:
-        pairs = ", ".join(f"{a}↔{b} ({c:.2f})" for a, b, c in stats.correlated_pairs[:3])
-        context_lines.append(f"High-risk correlations: {pairs}")
-    bad_high_w: list[str] = []
-    for co, results, _, _ in computed:
-        for p, r in results:
-            if r.status == "bad" and getattr(p, "weight", 0) >= 0.08:
-                bad_high_w.append(
-                    f"{co.ticker or co.name} {p.label}={r.score} (w={getattr(p, 'weight', 0):.2f})"
-                )
-                break
-    if bad_high_w:
-        context_lines.append("Key bad high-weight: " + " | ".join(bad_high_w[:3]))
-    return "\n".join(context_lines)
+        pairs = ", ".join(f"{a}↔{b} ({c:.2f})" for a, b, c in stats.correlated_pairs)
+        lines.append(f"High-risk correlations: {pairs}")
+
+    # Per-company block: ticker, status, composite, and EVERY indicator.
+    lines.append("Companies (each shows composite, status, and ALL indicators):")
+    for co, results, comp, _ in computed:
+        tkr = (getattr(co, "ticker", "") or co.name or "?").upper()
+        status = _composite_status(comp)
+        if not results:
+            lines.append(f"- {tkr}: {status} (composite {comp:.0f}, loading)")
+            continue
+        lines.append(f"- {tkr}: {status} (composite {comp:.0f})")
+        # All indicators, sorted by score desc, formatted as label=score(status, w=weight)
+        for p, r in sorted(results, key=lambda pr: pr[1].score, reverse=True):
+            w = getattr(p, "weight", 0)
+            lines.append(f"    {p.label} = {r.score:.0f} ({r.status}, w={w:.2f})")
+
+    return "\n".join(lines)
 
 
 _EARLY_WARNING_SYSTEM_PROMPT = (
     "You are the Early Warning Trigger Export agent for a wholesale credit "
     "portfolio risk dashboard.\n\n"
     "LIVE PORTFOLIO SNAPSHOT (real data, refreshed every render — this is the "
-    "ground truth, you DO have access to it, NEVER ask the user to provide it):\n"
+    "ground truth, you DO have access to it, NEVER ask the user to provide it, "
+    "and the snapshot contains EVERY company with EVERY indicator value):\n"
     "<<<SNAPSHOT>>>\n"
     "{snapshot}\n"
     "<<<END SNAPSHOT>>>\n\n"
-    "Reply with 1-3 ultra-short, professional insights per turn. Focus on "
-    "early-warning triggers using factor models, network contagion, tail "
-    "clustering, and leading-indicator logic. For greetings or capability "
-    "questions, reply conversationally in 1-2 sentences. Never use disclaimers, "
-    "hedging, or boilerplate. Be direct and compact. One sentence max per point."
+    "REPLY FORMAT:\n"
+    "- Default: 1-3 short bullets, each one sentence max, concrete numbers.\n"
+    "- 'summary of pain points' / 'how to fix': 2-4 short bullets, each 'pain' "
+    "+ 'action' (e.g. 'Reduce X: ...').\n"
+    "- 'what companies' / 'list all' / 'show indicators for X': answer directly "
+    "from the snapshot — it IS complete.\n"
+    "- Greetings / capability questions: 1-2 sentences.\n"
+    "- No disclaimers, no hedging, no boilerplate. Direct, professional, compact."
 )
+
+
+_MAX_HISTORY_MESSAGES = 12  # keep recent turns only; snapshot carries the rest
+
+
+def _trim_history(history: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Keep the most recent N messages so we don't blow the context window."""
+    if len(history) <= _MAX_HISTORY_MESSAGES:
+        return history
+    return history[-_MAX_HISTORY_MESSAGES:]
+
+
+def _try_llm_response(history: list[dict[str, str]], snapshot_ctx: str) -> str:
+    """Call the configured LLM (OpenCode Zen) and return its response.
+
+    Caller must have already verified ``OPENCODE_API_KEY`` is set. Raises on
+    any error (network, HTTP, empty response after retries + fallback model).
+    """
+    api_key = os.getenv("OPENCODE_API_KEY") or ""
+    base_url = os.getenv("OPENCODE_BASE_URL", "https://opencode.ai/zen/v1")
+    model = os.getenv("OPENCODE_LLM_MODEL", "minimax-m3")
+    system_prompt = _EARLY_WARNING_SYSTEM_PROMPT.format(snapshot=snapshot_ctx)
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": system_prompt},
+        *_trim_history(history),
+    ]
+    text = _call_opencode_zen_with_fallback(api_key, model, base_url, messages)
+    if not text:
+        msg = "LLM returned no content (empty response after retries)"
+        raise RuntimeError(msg)
+    return text
 
 
 def _early_warning_agent(history: list[dict[str, str]]) -> str:
@@ -390,24 +601,30 @@ def _early_warning_agent(history: list[dict[str, str]]) -> str:
 
     snapshot_ctx = _build_snapshot_context()
     last_user = history[-1]["content"] if history and history[-1].get("role") == "user" else ""
+    _dash(f"EW agent: user_msg={last_user[:60]!r} snapshot_chars={len(snapshot_ctx)}")
 
-    # Try real LLM via OpenCode Zen (Anomaly gateway) if key present
-    api_key = os.getenv("OPENCODE_API_KEY")
-    if api_key:
+    # Try real LLM via OpenCode Zen (Anomaly gateway) if key present.
+    # If the key is set but the call fails, return a clear error instead of
+    # silently dropping to the deterministic fallback (which is misleading
+    # because it ignores the user's question and just dumps a fixed insight).
+    if os.getenv("OPENCODE_API_KEY"):
+
+        def _logged_llm() -> str:
+            _dash(
+                f"EW agent: calling OpenCode Zen "
+                f"model={os.getenv('OPENCODE_LLM_MODEL', 'minimax-m3')}"
+            )
+            text = _try_llm_response(history, snapshot_ctx)
+            _dash(f"EW agent: LLM response chars={len(text)} preview={text[:80]!r}")
+            return text
+
         try:
-            base_url = os.getenv("OPENCODE_BASE_URL", "https://opencode.ai/zen/v1")
-            model = os.getenv("OPENCODE_LLM_MODEL", "minimax-m3")
-            system_prompt = _EARLY_WARNING_SYSTEM_PROMPT.format(snapshot=snapshot_ctx)
-            messages: list[dict[str, str]] = [
-                {"role": "system", "content": system_prompt},
-                *history,
-            ]
-            text = _call_opencode_zen(api_key, model, base_url, messages)
-            if text:
-                lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-                return " ".join(lines[:3]) if lines else text[:280]
+            return _logged_llm()
         except Exception as exc:
-            logger.info("OpenCode Zen call failed, falling back to deterministic: %s", exc)
+            logger.warning("OpenCode Zen call failed: %s", exc)
+            _dash(f"EW agent: LLM call FAILED: {exc}")
+            return f"LLM call failed: {exc}. Check key / network and try again."
+    _dash("EW agent: no OPENCODE_API_KEY — using deterministic fallback")
 
     # Deterministic fallback (no key or LLM error)
     query = last_user.lower().strip()
@@ -670,15 +887,47 @@ def main() -> None:
 
         # Process any completions from background workers (SAFE: this is main thread)
         with _mutation_lock:
+            completed_now = list(_completed_mutations.keys())
+            if completed_now:
+                _dash(f"MAIN: processing {len(completed_now)} completion(s): {completed_now}")
             for orig_tkr in list(_completed_mutations.keys()):
                 info = _completed_mutations.pop(orig_tkr, {})
                 logger.info("processing completed mutation: %s", info)
-                tkr = info.get("ticker", orig_tkr)
+                _dash(
+                    f"MAIN: completion for {orig_tkr}: "
+                    f"action={info.get('action')} success={info.get('success')}"
+                )
+                tkr_raw = info.get("ticker", orig_tkr)
+                tkr = tkr_raw if isinstance(tkr_raw, str) else str(tkr_raw or orig_tkr)
                 if info.get("success"):
                     if info.get("action") == "add":
-                        start = info.get("start") or datetime.now(UTC).isoformat()
-                        st.session_state.setdefault("pending_refreshes", {})[tkr] = start
-                        st.session_state["_toast"] = (f"Added {tkr}. Fetching data…", "⏳")
+                        start_raw = info.get("start")
+                        start = (
+                            start_raw
+                            if isinstance(start_raw, str)
+                            else datetime.now(UTC).isoformat()
+                        )
+                        # Race / stale-data guard: the background fetch may
+                        # have ALREADY completed and written data before the
+                        # main thread processes this completion (or the data
+                        # is leftover from a previous run). In either case,
+                        # the ticker has real DB data — show the real card
+                        # immediately, don't trap the UI in loading state.
+                        hist_store: HistoricalStore = make_historical_store()
+                        last_data: str | None = hist_store.get_last_update(tkr)
+                        already_done = last_data is not None
+                        if already_done:
+                            _dash(
+                                f"MAIN: ADD {tkr} — data already in DB "
+                                f"(data={last_data}), NOT setting pending"
+                            )
+                        else:
+                            st.session_state.setdefault("pending_refreshes", {})[tkr] = start
+                            _dash(
+                                f"MAIN: applied ADD completion for {tkr} "
+                                f"(pending set, force_rerun, provisional dropped)"
+                            )
+                        st.session_state["_toast"] = (f"Added {tkr}.", "✅")
                         st.session_state["_force_full_rerun"] = True
                         # real one now in DB; drop provisional
                         prov = st.session_state.get("provisional_adds") or {}
@@ -693,8 +942,11 @@ def main() -> None:
                     elif info.get("action") == "remove":
                         st.session_state["_toast"] = (f"Removed {tkr}", "🗑️")
                         st.session_state["_force_full_rerun"] = True
+                        _dash(f"MAIN: applied REMOVE completion for {tkr}")
                 else:
-                    st.session_state["_last_error"] = info.get("error", f"Unknown error for {tkr}")
+                    err = info.get("error", f"Unknown error for {tkr}")
+                    st.session_state["_last_error"] = err
+                    _dash(f"MAIN: mutation ERROR for {tkr}: {err}")
                     logger.info("applied error from mutation for %s", tkr)
                 # always clear any provisional for this ticker on completion
                 if info.get("action") == "add":
@@ -786,30 +1038,57 @@ def main() -> None:
                 results_lookup=results_lookup,
             )
 
-        # Clear pending only once the background refresh has written the _refresh_complete
-        # marker (i.e. all per-entity sources have finished, whether they produced data,
-        # "no data found", or rate-limited markers). This guarantees the card shows the
-        # full indicator list instead of a partially populated one.
-        for tkr in list(pending):
-            if tkr != "global":
-                start = pending[tkr]
-                if not isinstance(start, str):
-                    start = "0"  # legacy bool/float
-                last_complete = hist_f.get_last_update(tkr, "_refresh_complete")
-                if last_complete and last_complete > start:
-                    logger.debug(
-                        "clearing pending for %s (complete at %s > start %s)",
-                        tkr,
-                        last_complete,
-                        start,
-                    )
-                    pending.pop(tkr, None)
-                    (st.session_state.get("_last_results_lookup") or {}).pop(tkr, None)
         if pending:
             st.caption(
                 "⏳ Background DB refresh(s) running for: " + ", ".join(sorted(pending.keys()))
             )
-        elif had_pending:
+
+        # Clear pending once the background refresh has written the _refresh_complete
+        # marker, OR the ticker has any fresh data, OR it has been pending for
+        # too long (stuck fetch from a previous process, a hung source, etc.).
+        now_dt = datetime.now(UTC)
+        for tkr in list(pending):
+            if tkr == "global":
+                continue
+            start = pending[tkr]
+            if not isinstance(start, str):
+                start = "0"  # legacy bool/float
+            last_complete = hist_f.get_last_update(tkr, "_refresh_complete")
+            last_data = hist_f.get_last_update(tkr)
+            if last_complete and last_complete > start:
+                logger.debug(
+                    "clearing pending for %s (complete at %s > start %s)",
+                    tkr,
+                    last_complete,
+                    start,
+                )
+                pending.pop(tkr, None)
+                (st.session_state.get("_last_results_lookup") or {}).pop(tkr, None)
+                continue
+            if last_data and last_data > start:
+                logger.debug(
+                    "clearing pending for %s (data at %s > start %s)",
+                    tkr,
+                    last_data,
+                    start,
+                )
+                pending.pop(tkr, None)
+                (st.session_state.get("_last_results_lookup") or {}).pop(tkr, None)
+                continue
+            # Stuck: too long without completion → drop so next render re-fetches.
+            try:
+                start_dt = datetime.fromisoformat(start)
+            except ValueError:
+                start_dt = now_dt - _STUCK_PENDING_TIMEOUT - timedelta(seconds=1)
+            if (now_dt - start_dt) > _STUCK_PENDING_TIMEOUT:
+                logger.info(
+                    "dropping stuck pending for %s (start=%s, no _refresh_complete)",
+                    tkr,
+                    start,
+                )
+                pending.pop(tkr, None)
+                (st.session_state.get("_last_results_lookup") or {}).pop(tkr, None)
+        if not pending and had_pending:
             # We just cleared the final pending entry (either in cards or here).
             # Force a full app rerun so outer code re-defines @st.fragment
             # with run_every=None (stopping the background polling).
@@ -933,12 +1212,29 @@ def _render_company_cards(
                 (st.session_state.get("_last_results_lookup") or {}).pop(ticker, None)
                 logger.debug("switching %s from loading to real card (complete marker)", ticker)
             else:
-                render_loading_company_card(
-                    company.name,
-                    company.sector,
-                    ticker,
-                )
-                continue
+                # Stuck detection: if pending has been sitting too long
+                # (e.g. fetch hung or was killed by a prior restart), fall
+                # through to the real card instead of staying in loading
+                # limbo. The next render's _ensure_data_for_new_companies
+                # will re-trigger the fetch.
+                try:
+                    start_dt = datetime.fromisoformat(start)
+                except ValueError:
+                    start_dt = datetime.now(UTC) - _STUCK_PENDING_TIMEOUT - timedelta(seconds=1)
+                if (datetime.now(UTC) - start_dt) > _STUCK_PENDING_TIMEOUT:
+                    logger.info(
+                        "card for %s: pending stuck (start=%s), falling through to real card",
+                        ticker,
+                        start,
+                    )
+                    pending.pop(ticker, None)
+                else:
+                    render_loading_company_card(
+                        company.name,
+                        company.sector,
+                        ticker,
+                    )
+                    continue
 
         last = hist.get_last_update(ticker) if hist else None
         if not last and landing:
@@ -1062,6 +1358,10 @@ def _render_add_company_form(
                 disabled=is_busy,
             ):
                 click_ts = time.time()
+                _dash(
+                    f"BUTTON CLICK: {ticker} is_present={is_present} "
+                    f"action={'REMOVE' if is_present else 'ADD'}"
+                )
                 logger.info(
                     "*** BUTTON CLICK: ticker=%s present=%s (remove=%s) ts=%.3f ***",
                     ticker,
@@ -1072,7 +1372,7 @@ def _render_add_company_form(
                 if is_present:
                     logger.info("*** EXECUTING REMOVE for %s (threaded) ***", ticker)
                     _start_company_mutation(ticker, is_remove=True)
-                    logger.info("*** REMOVE started, about to rerun ***")
+                    _dash(f"BUTTON: REMOVE dispatched for {ticker}; rerunning fragment")
                     st.rerun(scope="fragment")
                 else:
                     logger.info("*** EXECUTING ADD for %s (threaded) ***", ticker)
@@ -1086,6 +1386,7 @@ def _render_add_company_form(
                         "name": name,
                         "sector": "",
                     }
+                    _dash(f"BUTTON: provisional_adds set for {ticker} (name={name!r})")
                     _start_company_mutation(ticker, is_remove=False)
                     logger.info("*** ADD started, about to rerun ***")
                     st.rerun(scope="fragment")
